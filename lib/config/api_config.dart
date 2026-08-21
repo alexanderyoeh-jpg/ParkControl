@@ -10,7 +10,7 @@ class ApiConfig {
 
   static const String _urlDesdeCompilacion = String.fromEnvironment(
     'PARKCONTROL_API_URL',
-    defaultValue: '',
+    defaultValue: 'https://api.neatspace.cl',
   );
 
   /// URL que usa cada compilación. Android usa 10.0.2.2 sólo como comodidad
