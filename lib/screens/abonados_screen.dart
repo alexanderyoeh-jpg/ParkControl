@@ -376,7 +376,7 @@ class _AbonadoCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: abonado.colorEstado.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
-                    border: BorderSide(color: abonado.colorEstado, width: 0.8),
+                    border: Border.all(color: abonado.colorEstado, width: 0.8),
                   ),
                   child: Text(
                     abonado.etiquetaEstado,

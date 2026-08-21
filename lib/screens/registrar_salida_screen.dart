@@ -489,7 +489,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
                         Icon(Icons.badge, size: 16, color: Color(0xFF2E7D32)),
                         SizedBox(width: 6),
                         Text(
-                          'ABONADO VIGENTE ($0 CLP)',
+                          'ABONADO VIGENTE (\$0 CLP)',
                           style: TextStyle(
                             color: Color(0xFF2E7D32),
                             fontWeight: FontWeight.bold,
