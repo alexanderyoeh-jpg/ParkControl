@@ -1,0 +1,35 @@
+{
+    "name": "ParkControl · Gestión de estacionamientos",
+    "short_name": "ParkControl",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#0F2B52",
+    "theme_color": "#0F2B52",
+    "description": "Gestión profesional de estacionamientos ParkControl.",
+    "orientation": "any",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/ParkControl-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/ParkControl-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/ParkControl-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/ParkControl-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
