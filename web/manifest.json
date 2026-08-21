@@ -1,32 +1,32 @@
 {
-    "name": "parkcontrol",
-    "short_name": "parkcontrol",
+    "name": "ParkControl · Gestión de estacionamientos",
+    "short_name": "ParkControl",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0F2B52",
+    "theme_color": "#0F2B52",
+    "description": "Gestión profesional de estacionamientos ParkControl.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
-            "src": "icons/Icon-192.png",
+            "src": "icons/ParkControl-192.png",
             "sizes": "192x192",
             "type": "image/png"
         },
         {
-            "src": "icons/Icon-512.png",
+            "src": "icons/ParkControl-512.png",
             "sizes": "512x512",
             "type": "image/png"
         },
         {
-            "src": "icons/Icon-maskable-192.png",
+            "src": "icons/ParkControl-maskable-192.png",
             "sizes": "192x192",
             "type": "image/png",
             "purpose": "maskable"
         },
         {
-            "src": "icons/Icon-maskable-512.png",
+            "src": "icons/ParkControl-maskable-512.png",
             "sizes": "512x512",
             "type": "image/png",
             "purpose": "maskable"

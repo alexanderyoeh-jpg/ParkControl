@@ -1,0 +1,40 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Backend de ParkControl",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check config.js && node --check servicios/resumen_diario.js && node --check servicios/formato_fecha.js",
+    "test:config": "node tests/configuracion_seguridad.test.js",
+    "test:respaldo": "node tests/respaldo_sqlite.test.js",
+    "test:preflight": "node tests/preflight_produccion.test.js",
+    "test:correo": "node tests/transporte_correo.test.js",
+    "test:cola-correo": "node tests/cola_informes_correo.test.js",
+    "test:resumen": "node tests/resumen_diario.test.js",
+    "test:fecha-pdf": "node tests/formato_fecha.test.js",
+    "test:plataformas": "node tests/plataformas_publicacion.test.js",
+    "test:abonados": "node tests/abonados.test.js",
+    "test:integracion": "node tests/superadmin.integration.js",
+    "test": "npm run check && npm run test:config && npm run test:respaldo && npm run test:preflight && npm run test:correo && npm run test:cola-correo && npm run test:resumen && npm run test:fecha-pdf && npm run test:plataformas && npm run test:abonados && npm run test:integracion",
+    "respaldo:sqlite": "node scripts/respaldo_sqlite.js",
+    "verificar:respaldo": "node scripts/verificar_restauracion_sqlite.js",
+    "preflight:produccion": "node scripts/preflight_produccion.js",
+    "simular:webhook": "node scripts/simular_webhook_mercadopago.js"
+  },
+  "keywords": [
+    "parkcontrol",
+    "estacionamiento",
+    "parking"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "pdfkit": "^0.17.2"
+  }
+}

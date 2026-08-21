@@ -1,0 +1,54 @@
+# Plantilla systemd para la API de ParkControl.
+#
+# Antes de instalarla, reemplaza las rutas si tu VPS usa una distribución o
+# una ubicación distinta. No agregues secretos a este archivo: systemd debe
+# leerlos desde /etc/parkcontrol/parkcontrol.env con permisos restrictivos.
+# Requiere que el usuario/grupo "parkcontrol" y la base ya existan.
+
+[Unit]
+Description=ParkControl API
+Documentation=file:/opt/parkcontrol/docs/DESPLIEGUE_VPS.md
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=parkcontrol
+Group=parkcontrol
+WorkingDirectory=/opt/parkcontrol/backend
+EnvironmentFile=/etc/parkcontrol/parkcontrol.env
+
+# Confirma la ruta real de Node con: command -v node
+ExecStart=/usr/bin/node /opt/parkcontrol/backend/server.js
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+KillSignal=SIGTERM
+UMask=0077
+
+# La API recibe tráfico solamente a través de Nginx en loopback. SQLite y sus
+# archivos WAL/-shm se conservan fuera del directorio del código desplegado.
+StateDirectory=parkcontrol
+ReadWritePaths=/var/lib/parkcontrol
+
+# Aislamiento compatible con Node y SQLite; validar primero en staging antes
+# de endurecer aún más las restricciones de la distribución elegida.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

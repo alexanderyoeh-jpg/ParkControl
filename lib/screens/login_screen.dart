@@ -1,10 +1,13 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
+import '../config/api_config.dart';
+import '../services/api_client.dart';
+import '../services/superadmin_service.dart';
 import 'admin_dashboard.dart';
 import 'cajero_dashboard.dart';
+import 'configurar_superadmin_screen.dart';
+import 'superadmin_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,90 +17,311 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController emailController =
-      TextEditingController();
+  final TextEditingController emailController = TextEditingController();
 
-  final TextEditingController passwordController =
-      TextEditingController();
-Future<void> iniciarSesion() async {
-  final email = emailController.text.trim();
-  final password = passwordController.text.trim();
+  final TextEditingController passwordController = TextEditingController();
 
-  // Acceso administrador
-  if (email == 'admin@parkcontrol.cl' && password == '123456') {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const AdminDashboard(),
-      ),
-    );
-    return;
+  bool cargando = false;
+  bool ocultarPassword = true;
+  bool verificandoConfiguracion = true;
+  bool requiereConfiguracion = false;
+
+  @override
+  void initState() {
+    super.initState();
+    verificarConfiguracionInicial();
   }
 
-  // Buscar cajero en los usuarios guardados
-  final prefs = await SharedPreferences.getInstance();
-  final datos = prefs.getString('usuarios');
+  Future<void> verificarConfiguracionInicial() async {
+    try {
+      final requiere = await const SuperAdminService()
+          .requiereConfiguracionInicial();
 
-  if (datos != null) {
-    final List<dynamic> usuarios = jsonDecode(datos);
-
-    final usuarioEncontrado = usuarios.cast<Map<String, dynamic>?>().firstWhere(
-      (usuario) =>
-          usuario?['email'] == email &&
-          usuario?['password'] == password,
-      orElse: () => null,
-    );
-
-  if (usuarioEncontrado != null) {
-  Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-      builder: (context) => CajeroDashboard(
-        usuario: usuarioEncontrado,
-      ),
-    ),
-  );
-  return;
-}
+      if (!mounted) return;
+      setState(() {
+        requiereConfiguracion = requiere;
+        verificandoConfiguracion = false;
+      });
+    } catch (_) {
+      // Conserva el acceso normal si el backend todavía no expone la ruta de
+      // configuración o está temporalmente sin conexión.
+      if (!mounted) return;
+      setState(() {
+        requiereConfiguracion = false;
+        verificandoConfiguracion = false;
+      });
+    }
   }
 
-  // Datos incorrectos
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Correo o contraseña incorrectos'),
-    ),
-  );
-}
+  // ============================================================
+  // INICIAR SESIÓN
+  // ============================================================
+
+  Future<void> iniciarSesion() async {
+    final email = emailController.text.trim();
+    final password = passwordController.text.trim();
+
+    // Validar campos
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ingresa correo y contraseña')),
+      );
+      return;
+    }
+
+    setState(() {
+      cargando = true;
+    });
+
+    try {
+      final response = await ApiClient.postPublico(
+        Uri.parse('${ApiConfig.baseUrl}/api/login'),
+        body: jsonEncode({'email': email, 'password': password}),
+      );
+
+      final decoded = jsonDecode(response.body);
+      final result = decoded is Map
+          ? Map<String, dynamic>.from(decoded)
+          : <String, dynamic>{};
+
+      // ========================================================
+      // LOGIN CORRECTO
+      // ========================================================
+
+      if (response.statusCode == 200) {
+        final usuario = Map<String, dynamic>.from(result['usuario']);
+
+        final token = result['token']?.toString().trim();
+
+        if (token == null || token.isEmpty) {
+          throw Exception('La API no entregó una sesión válida');
+        }
+
+        final usuarioId = _enteroPositivo(usuario['id']);
+        final estacionamientoId = _enteroPositivo(usuario['estacionamientoId']);
+        final rol = usuario['rol']?.toString();
+
+        if (usuarioId == null ||
+            (rol != 'superadmin' && estacionamientoId == null)) {
+          throw Exception('La API no entregó el contexto de sesión completo');
+        }
+
+        await ApiClient.guardarSesion(
+          token: token,
+          usuarioId: usuarioId,
+          estacionamientoId: estacionamientoId,
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+          cargando = false;
+        });
+
+        // ======================================================
+        // ADMINISTRADOR
+        // ======================================================
+
+        if (usuario['rol'] == 'admin' ||
+            usuario['rol'] == 'admin_estacionamiento') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => AdminDashboard()),
+          );
+
+          return;
+        }
+
+        // ======================================================
+        // SUPERADMINISTRADOR
+        // ======================================================
+
+        if (usuario['rol'] == 'superadmin') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const SuperAdminDashboard(),
+            ),
+          );
+
+          return;
+        }
+
+        // ======================================================
+        // CAJERO
+        // ======================================================
+
+        if (usuario['rol'] == 'cajero') {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => CajeroDashboard(usuario: usuario),
+            ),
+          );
+
+          return;
+        }
+
+        // ======================================================
+        // ROL NO RECONOCIDO
+        // ======================================================
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('El usuario no tiene un rol válido')),
+        );
+
+        return;
+      }
+
+      // ========================================================
+      // DATOS FALTANTES
+      // ========================================================
+
+      if (response.statusCode == 400) {
+        if (!mounted) return;
+
+        setState(() {
+          cargando = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['mensaje'] ?? 'Email y contraseña son obligatorios',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // ========================================================
+      // CREDENCIALES INCORRECTAS
+      // ========================================================
+
+      if (response.statusCode == 401) {
+        if (!mounted) return;
+
+        setState(() {
+          cargando = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result['mensaje'] ?? 'Correo o contraseña incorrectos',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // ========================================================
+      // CUENTA SUSPENDIDA O SIN AUTORIZACIÓN
+      // ========================================================
+
+      if (response.statusCode == 403) {
+        if (!mounted) return;
+
+        setState(() {
+          cargando = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.red.shade700,
+            content: Text(
+              result['mensaje'] ??
+                  'La cuenta está suspendida o no tiene autorización.',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      // ========================================================
+      // OTRO ERROR DEL SERVIDOR
+      // ========================================================
+
+      if (!mounted) return;
+
+      setState(() {
+        cargando = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result['mensaje']?.toString() ?? 'Error inesperado del servidor',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        cargando = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo conectar con la API')),
+      );
+    }
+  }
+
+  // ============================================================
+  // LIBERAR CONTROLADORES
+  // ============================================================
 
   @override
   void dispose() {
     emailController.dispose();
     passwordController.dispose();
+
     super.dispose();
   }
 
+  // ============================================================
+  // INTERFAZ
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
+    if (verificandoConfiguracion) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF061A36),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    if (requiereConfiguracion) {
+      return ConfigurarSuperAdminScreen(
+        onConfigurado: () {
+          if (!mounted) return;
+          setState(() => requiereConfiguracion = false);
+        },
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF061A36),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 28,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Column(
               children: [
+                // =================================================
                 // LOGO
+                // =================================================
                 Container(
                   width: 90,
                   height: 90,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: Colors.white,
-                      width: 2,
-                    ),
+                    border: Border.all(color: Colors.white, width: 2),
                   ),
                   child: const Icon(
                     Icons.local_parking_rounded,
@@ -108,7 +332,9 @@ Future<void> iniciarSesion() async {
 
                 const SizedBox(height: 24),
 
+                // =================================================
                 // NOMBRE
+                // =================================================
                 const Text(
                   'ParkControl',
                   style: TextStyle(
@@ -123,15 +349,14 @@ Future<void> iniciarSesion() async {
                 const Text(
                   'Gestión inteligente de estacionamientos',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 15,
-                  ),
+                  style: TextStyle(color: Colors.white70, fontSize: 15),
                 ),
 
                 const SizedBox(height: 45),
 
+                // =================================================
                 // CORREO
+                // =================================================
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
@@ -148,39 +373,25 @@ Future<void> iniciarSesion() async {
 
                 TextField(
                   controller: emailController,
-                  style: const TextStyle(
-                    color: Colors.white,
-                  ),
-                  keyboardType:
-                      TextInputType.emailAddress,
+                  style: const TextStyle(color: Colors.white),
+                  keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
-                    hintText:
-                        'ejemplo@parkcontrol.cl',
-                    hintStyle: const TextStyle(
-                      color: Colors.white54,
-                    ),
+                    hintText: 'ejemplo@parkcontrol.cl',
+                    hintStyle: const TextStyle(color: Colors.white54),
                     prefixIcon: const Icon(
                       Icons.email_outlined,
                       color: Colors.white70,
                     ),
                     filled: true,
-                    fillColor:
-                        Colors.white.withOpacity(0.08),
-                    enabledBorder:
-                        OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(12),
+                    fillColor: Colors.white.withOpacity(0.08),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide(
-                        color:
-                            Colors.white.withOpacity(0.15),
+                        color: Colors.white.withOpacity(0.15),
                       ),
                     ),
-                    focusedBorder:
-                        const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(
-                        Radius.circular(12),
-                      ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
                       borderSide: BorderSide(
                         color: Color(0xFF2979FF),
                         width: 2,
@@ -191,7 +402,9 @@ Future<void> iniciarSesion() async {
 
                 const SizedBox(height: 22),
 
+                // =================================================
                 // CONTRASEÑA
+                // =================================================
                 const Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
@@ -208,37 +421,38 @@ Future<void> iniciarSesion() async {
 
                 TextField(
                   controller: passwordController,
-                  obscureText: true,
-                  style: const TextStyle(
-                    color: Colors.white,
-                  ),
+                  obscureText: ocultarPassword,
+                  style: const TextStyle(color: Colors.white),
                   decoration: InputDecoration(
                     hintText: '••••••••',
-                    hintStyle: const TextStyle(
-                      color: Colors.white54,
-                    ),
+                    hintStyle: const TextStyle(color: Colors.white54),
                     prefixIcon: const Icon(
                       Icons.lock_outline,
                       color: Colors.white70,
                     ),
-                    filled: true,
-                    fillColor:
-                        Colors.white.withOpacity(0.08),
-                    enabledBorder:
-                        OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color:
-                            Colors.white.withOpacity(0.15),
+                    suffixIcon: IconButton(
+                      onPressed: () {
+                        setState(() {
+                          ocultarPassword = !ocultarPassword;
+                        });
+                      },
+                      icon: Icon(
+                        ocultarPassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                        color: Colors.white70,
                       ),
                     ),
-                    focusedBorder:
-                        const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(
-                        Radius.circular(12),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.08),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: Colors.white.withOpacity(0.15),
                       ),
+                    ),
+                    focusedBorder: const OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
                       borderSide: BorderSide(
                         color: Color(0xFF2979FF),
                         width: 2,
@@ -249,30 +463,14 @@ Future<void> iniciarSesion() async {
 
                 const SizedBox(height: 18),
 
-                // RECORDAR SESIÓN
-                Row(
+                const Row(
                   children: [
-                    Checkbox(
-                      value: true,
-                      onChanged: (_) {},
-                      checkColor: Colors.white,
-                      activeColor:
-                          const Color(0xFF1565FF),
-                    ),
-                    const Text(
-                      'Recordar sesión',
-                      style: TextStyle(
-                        color: Colors.white,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () {},
-                      child: const Text(
-                        '¿Olvidaste tu contraseña?',
-                        style: TextStyle(
-                          color: Color(0xFF64B5FF),
-                        ),
+                    Icon(Icons.lock_outline, size: 16, color: Colors.white54),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Por seguridad, la sesión se cierra al salir de la aplicación.',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                     ),
                   ],
@@ -280,42 +478,51 @@ Future<void> iniciarSesion() async {
 
                 const SizedBox(height: 18),
 
-                // INGRESAR
+                // =================================================
+                // BOTÓN INGRESAR
+                // =================================================
                 SizedBox(
                   width: double.infinity,
                   height: 54,
                   child: ElevatedButton(
-                    onPressed: iniciarSesion,
-                    style:
-                        ElevatedButton.styleFrom(
-                      backgroundColor:
-                          const Color(0xFF1565FF),
-                      foregroundColor:
-                          Colors.white,
-                      shape:
-                          RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(12),
+                    onPressed: cargando ? null : iniciarSesion,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1565FF),
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: const Color(
+                        0xFF1565FF,
+                      ).withOpacity(0.6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    child: const Text(
-                      'Ingresar',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                    child: cargando
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Ingresar',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                   ),
                 ),
 
                 const SizedBox(height: 45),
 
+                // =================================================
+                // VERSIÓN
+                // =================================================
                 const Text(
                   'Versión 1.0.0',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 13,
-                  ),
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
                 ),
               ],
             ),
@@ -323,5 +530,12 @@ Future<void> iniciarSesion() async {
         ),
       ),
     );
+  }
+
+  static int? _enteroPositivo(Object? valor) {
+    final entero = valor is int
+        ? valor
+        : int.tryParse(valor?.toString().trim() ?? '');
+    return entero != null && entero > 0 ? entero : null;
   }
 }

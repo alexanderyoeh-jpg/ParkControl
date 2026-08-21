@@ -50,3 +50,22 @@ app.*.map.json
 
 # Archives
 *.zip
+
+# ParkControl - bases locales y respaldos con datos reales
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
+backend/backups/
+backend/node_modules/
+
+# Cachés y reportes locales de compilación (no forman parte del producto).
+.gradle-codex/
+.task-flutter-state/
+android/build/
+
+# Firma privada de Android: nunca se comparte ni se publica.
+android/key.properties
+*.jks
+*.keystore
+# Widget Preview related
+.widget_preview/

@@ -1,0 +1,63 @@
+# Plantilla Nginx para la plataforma web/PWA: app.tu-dominio.cl.
+#
+# La API sigue en api.tu-dominio.cl y Node continúa escuchando sólo en
+# 127.0.0.1. Reemplaza dominio, rutas de certificados y directorio `root`.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name app.tu-dominio.cl;
+    server_tokens off;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name app.tu-dominio.cl;
+    server_tokens off;
+
+    root /var/www/parkcontrol-web;
+    index index.html;
+
+    ssl_certificate /etc/letsencrypt/live/app.tu-dominio.cl/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.tu-dominio.cl/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Los archivos de entrada y del service worker no deben quedar pegados a
+    # una versión antigua después de una publicación.
+    location = /index.html {
+        add_header Cache-Control "no-store";
+        try_files $uri =404;
+    }
+
+    location = /flutter_service_worker.js {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+
+    # Los recursos de Flutter pueden conservarse temporalmente; no se aplica
+    # esta regla a main.dart.js ni a flutter_bootstrap.js.
+    location ^~ /assets/ {
+        expires 7d;
+        add_header Cache-Control "public";
+        try_files $uri =404;
+    }
+
+    # Permite recargar rutas de Flutter Web sin que Nginx devuelva 404.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

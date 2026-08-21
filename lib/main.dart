@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+
+import 'services/api_client.dart';
 import 'screens/login_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ApiClient.inicializarSesion();
   runApp(const ParkControlApp());
 }
 
@@ -15,9 +19,7 @@ class ParkControlApp extends StatelessWidget {
       title: 'ParkControl',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1565FF),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1565FF)),
       ),
       home: const LoginScreen(),
     );

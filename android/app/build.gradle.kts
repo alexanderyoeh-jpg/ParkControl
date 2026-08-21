@@ -1,3 +1,24 @@
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+if (keystorePropertiesFile.isFile) {
+    keystorePropertiesFile.inputStream().use(keystoreProperties::load)
+}
+
+val requiredReleaseSigningProperties = listOf(
+    "storeFile",
+    "storePassword",
+    "keyAlias",
+    "keyPassword",
+)
+val releaseStoreFilePath = keystoreProperties.getProperty("storeFile")?.trim()
+val releaseStoreFile = releaseStoreFilePath?.let(rootProject::file)
+val releaseSigningConfigured = requiredReleaseSigningProperties.all {
+    !keystoreProperties.getProperty(it).isNullOrBlank()
+} && releaseStoreFile?.isFile == true
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -5,7 +26,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.parkcontrol"
+    namespace = "cl.parkcontrol.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,8 +36,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.parkcontrol"
+        applicationId = "cl.parkcontrol.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -25,11 +45,22 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                storeFile = releaseStoreFile
+                storePassword = keystoreProperties.getProperty("storePassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
@@ -42,4 +73,16 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Impide publicar por accidente un APK/AAB firmado con la llave de depuración.
+tasks.configureEach {
+    if (name.contains("Release", ignoreCase = true)) {
+        doFirst {
+            check(releaseSigningConfigured) {
+                "Falta una firma de publicación válida. Copia android/key.properties.example " +
+                    "como android/key.properties y configura un keystore privado."
+            }
+        }
+    }
 }

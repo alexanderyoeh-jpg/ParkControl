@@ -1,0 +1,87 @@
+# Plantilla Nginx para api.tu-dominio.cl.
+#
+# Reemplaza api.tu-dominio.cl y las rutas de certificados. Mantén Node en
+# 127.0.0.1; no publiques el puerto 3000 en el firewall. El bloque HTTPS
+# presupone que el certificado ya fue emitido (por ejemplo, con Let's Encrypt).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.tu-dominio.cl;
+    server_tokens off;
+
+    # Conserva este bloque sólo mientras el emisor de certificados lo requiera.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.tu-dominio.cl;
+    server_tokens off;
+
+    ssl_certificate /etc/letsencrypt/live/api.tu-dominio.cl/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.tu-dominio.cl/privkey.pem;
+    # Generado y mantenido por el gestor de certificados de la distribución.
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    # Debe coincidir con PARKCONTROL_JSON_LIMIT (256kb por defecto) o ser más
+    # restrictivo. PDFs son respuestas y no requieren ampliar este límite.
+    client_max_body_size 256k;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    # Activar HSTS sólo después de confirmar que el dominio tiene TLS válido.
+    # No se fuerza includeSubDomains porque puede afectar servicios ajenos.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # El endpoint de vida no contiene datos comerciales. Puede usarse para un
+    # monitor externo. Si no se desea exposición pública, aplicar allow/deny
+    # igual que en /readyz.
+    location = /healthz {
+        access_log off;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # /readyz comprueba una lectura SQLite. Se limita al VPS para no convertirlo
+    # en un endpoint de monitorización público. Para un monitor remoto, agrega
+    # sólo su IP/CIDR explícita antes de "deny all".
+    location = /readyz {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        access_log off;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+    }
+}

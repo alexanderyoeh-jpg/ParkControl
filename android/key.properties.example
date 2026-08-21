@@ -1,0 +1,6 @@
+# Copiar como key.properties y guardar las claves reales fuera de Git.
+# `storeFile` debe ser una ruta absoluta al keystore de publicación privado.
+storePassword=REEMPLAZAR_POR_CONTRASENA_SEGURA
+keyPassword=REEMPLAZAR_POR_CONTRASENA_SEGURA
+keyAlias=parkcontrol
+storeFile=C:/RUTA/PRIVADA/parkcontrol-upload.jks
