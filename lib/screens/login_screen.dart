@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import '../config/api_config.dart';
 import '../services/api_client.dart';
 import '../services/superadmin_service.dart';
+import '../services/actualizacion_service.dart';
+import '../widgets/modal_descargas.dart';
 import 'admin_dashboard.dart';
 import 'cajero_dashboard.dart';
 import 'configurar_superadmin_screen.dart';
@@ -30,6 +32,64 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     verificarConfiguracionInicial();
+    _verificarActualizacionesApp();
+  }
+
+  Future<void> _verificarActualizacionesApp() async {
+    try {
+      final info = await const ActualizacionService().consultarUltimaVersion();
+      if (info != null && const ActualizacionService().hayNuevaVersion(info)) {
+        if (!mounted) return;
+        _mostrarDialogoActualizacion(info);
+      }
+    } catch (_) {}
+  }
+
+  void _mostrarDialogoActualizacion(InfoVersion info) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.system_update_rounded, color: Color(0xFF0F5ED7)),
+            SizedBox(width: 10),
+            Text('Actualización disponible'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Hay una nueva versión de ParkControl (v${info.version}) lista con mejoras.',
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+            if (info.novedades.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              const Text('Novedades:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const SizedBox(height: 4),
+              ...info.novedades.map((n) => Text('• $n', style: const TextStyle(fontSize: 12, color: Colors.black87))),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Más tarde'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F5ED7)),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ModalDescargas.mostrar(context);
+            },
+            icon: const Icon(Icons.download_rounded, size: 18),
+            label: const Text('Actualizar Ahora'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> verificarConfiguracionInicial() async {
@@ -515,14 +575,42 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 45),
+                const SizedBox(height: 18),
+
+                // =================================================
+                // BOTÓN DESCARGAR APLICACIÓN
+                // =================================================
+                OutlinedButton.icon(
+                  onPressed: () => ModalDescargas.mostrar(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.download_for_offline_outlined, size: 20),
+                  label: const Text(
+                    'Descargar App (Android / Windows / iOS)',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                ),
+
+                const SizedBox(height: 35),
 
                 // =================================================
                 // VERSIÓN
                 // =================================================
-                const Text(
-                  'Versión 1.0.0',
-                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                InkWell(
+                  onTap: () => ModalDescargas.mostrar(context),
+                  child: const Padding(
+                    padding: EdgeInsets.all(8.0),
+                    child: Text(
+                      'Versión 1.0.0 (Oficial)',
+                      style: TextStyle(color: Colors.white54, fontSize: 13),
+                    ),
+                  ),
                 ),
               ],
             ),
