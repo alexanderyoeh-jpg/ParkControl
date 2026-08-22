@@ -34,12 +34,17 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     verificarConfiguracionInicial();
-    _verificarActualizacionesApp();
+    if (!kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _verificarActualizacionesApp();
+      });
+    }
   }
 
   Future<void> _verificarActualizacionesApp() async {
+    if (kIsWeb) return;
     try {
-      final info = await const ActualizacionService().consultarUltimaVersion();
+      final info = await const ActualizacionService().consultarUltimaVersion().timeout(const Duration(seconds: 4));
       if (info != null && const ActualizacionService().hayNuevaVersion(info)) {
         if (!mounted) return;
         _mostrarDialogoActualizacion(info);
@@ -609,6 +614,50 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Widget _seccionDescargaDirecta(BuildContext context) {
+    if (!kIsWeb) {
+      return Container(
+        margin: const EdgeInsets.only(top: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.check_circle_outline, color: Color(0xFF3DDC84), size: 16),
+            const SizedBox(width: 8),
+            const Text(
+              'App Instalada • Offline Activo',
+              style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF90CAF9),
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+              onPressed: () async {
+                final info = await const ActualizacionService().consultarUltimaVersion();
+                if (!context.mounted) return;
+                if (info != null && const ActualizacionService().hayNuevaVersion(info)) {
+                  _mostrarDialogoActualizacion(info);
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('¡Tienes la versión más reciente instalada! (v1.0.0)')),
+                  );
+                }
+              },
+              icon: const Icon(Icons.refresh_rounded, size: 14),
+              label: const Text('Actualizar', style: TextStyle(fontSize: 12)),
+            ),
+          ],
+        ),
+      );
+    }
+
     final bool esAndroid = defaultTargetPlatform == TargetPlatform.android;
     final bool esIos = defaultTargetPlatform == TargetPlatform.iOS;
     final bool esWindows = defaultTargetPlatform == TargetPlatform.windows;

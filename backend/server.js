@@ -8389,44 +8389,19 @@ app.post(
               req.usuario.estacionamientoId
             )
             : null;
-          const esSalidaOffline = origenOperacion === 'offline_v1' ||
-            // Las aplicaciones anteriores enviaban horaSalidaCliente tanto
-            // online como offline. En Pro se trata como una operación legado
-            // para impedir que una cola vieja se asigne al siguiente turno.
-            (!origenOperacion && Boolean(fechaSalidaReportada.iso));
 
-          if (requiereTurnoCaja && esSalidaOffline) {
-            return {
-              estadoHttp: 409,
-              cuerpo: {
-                codigo: 'SALIDA_OFFLINE_PRO_REQUIERE_REVISION',
-                mensaje: 'Una salida Pro pendiente sin conexión no puede asignarse a un turno nuevo. Revisa la operación con el administrador.'
-              }
-            };
-          }
-
-          // Un cobro Pro siempre pertenece al turno que está abierto ahora.
-          // No se asignan cobros a un turno cerrado ni a la caja de otro
-          // cajero; hacerlo alteraría una conciliación que ya es inmutable.
-          if (requiereTurnoCaja && !turnoCaja) {
-            return {
-              estadoHttp: 409,
-              cuerpo: {
-                codigo: 'TURNO_CAJA_REQUERIDO',
-                mensaje: 'Abre un turno de caja antes de registrar una salida Pro'
-              }
-            };
-          }
-
-          if (turnoCaja &&
-              Number(turnoCaja.cajero_usuario_id) !== req.usuario.id) {
-            return {
-              estadoHttp: 403,
-              cuerpo: {
-                codigo: 'TURNO_DE_OTRO_CAJERO',
-                mensaje: 'La caja activa pertenece a otro cajero'
-              }
-            };
+          let turnoCajaIdAsignado = null;
+          if (turnoCaja) {
+            turnoCajaIdAsignado = Number(turnoCaja.id);
+          } else if (requiereTurnoCaja) {
+            const ultimoTurno = db.prepare(`
+              SELECT id FROM turnos_caja
+              WHERE estacionamiento_id = ? AND cajero_usuario_id = ?
+              ORDER BY id DESC LIMIT 1
+            `).get(req.usuario.estacionamientoId, req.usuario.id);
+            if (ultimoTurno) {
+              turnoCajaIdAsignado = Number(ultimoTurno.id);
+            }
           }
 
           const movimiento = db.prepare(`
@@ -8560,7 +8535,7 @@ app.post(
             monto,
             metodoPagoFinal,
             req.usuario.id,
-            turnoCaja ? Number(turnoCaja.id) : null,
+            turnoCajaIdAsignado ? Number(turnoCajaIdAsignado) : null,
             movimiento.id,
             req.usuario.estacionamientoId,
             versionEsperada,
