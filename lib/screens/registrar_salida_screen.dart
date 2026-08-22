@@ -73,7 +73,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
     try {
       final response = await ApiClient.get(
         Uri.parse('${ApiConfig.baseUrl}/api/vehiculos/$patente'),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(milliseconds: 2500));
 
       debugPrint('STATUS BUSCAR SALIDA: ${response.statusCode}');
 
@@ -94,7 +94,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
         try {
           final tarifaResponse = await ApiClient.get(
             Uri.parse('${ApiConfig.baseUrl}/api/tarifa'),
-          ).timeout(const Duration(seconds: 10));
+          ).timeout(const Duration(milliseconds: 2000));
 
           if (tarifaResponse.statusCode == 200) {
             final tarifaResult = jsonDecode(tarifaResponse.body);
@@ -165,7 +165,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
         ),
       );
     } catch (e) {
-      debugPrint('ERROR BUSCANDO VEHÍCULO: $e');
+      debugPrint('ERROR BUSCANDO VEHÍCULO (MODO OFFLINE): $e');
 
       if (!mounted) return;
 
@@ -173,7 +173,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
         patente,
       );
       final tarifaLocal =
-          await OfflineAppService.instancia.tarifaPorMinutoActual() ?? 48;
+          await OfflineAppService.instancia.tarifaPorMinutoActual() ?? 48.0;
 
       if (!mounted) return;
 
@@ -196,6 +196,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
             'observacion': local.observacion,
             'horaEntrada': local.horaEntrada.toIso8601String(),
             'version': local.versionServidor,
+            'tarifaPorMinuto': tarifaLocal,
             'offline': true,
           };
           montoCalculado = minutos * tarifaLocal;
@@ -210,15 +211,33 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
         return;
       }
 
+      // Si no estaba en la caché local previa, permitir registrar salida manual directa
+      final horaActual = DateTime.now();
+      final horaEstimada = horaActual.subtract(const Duration(minutes: 30));
+      const minutosEstimados = 30.0;
+      final montoEstimado = minutosEstimados * tarifaLocal;
+
       setState(() {
         buscando = false;
-        vehiculoEncontrado = false;
-        vehiculoActual = null;
-        montoCalculado = 0;
+        vehiculoEncontrado = true;
+        vehiculoActual = {
+          'id': null,
+          'patente': patente,
+          'tipo': 'Auto',
+          'color': 'No especificado',
+          'observacion': 'Salida offline directa',
+          'horaEntrada': horaEstimada.toIso8601String(),
+          'tarifaPorMinuto': tarifaLocal,
+          'offline': true,
+        };
+        montoCalculado = montoEstimado;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo conectar con la API')),
+        SnackBar(
+          content: Text('Modo Offline: Cobro habilitado para $patente (Tarifa \$${tarifaLocal.toInt()}/min)'),
+          duration: const Duration(seconds: 4),
+        ),
       );
     }
   }
@@ -273,7 +292,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/salidas'),
         body: firmaDatos,
         claveIdempotencia: _claveOperacionPendiente,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(milliseconds: 2500));
 
       debugPrint('STATUS SALIDA: ${response.statusCode}');
 
@@ -335,23 +354,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
       );
       return;
     } catch (e) {
-      debugPrint('ERROR REGISTRANDO SALIDA: $e');
-
-      // Una salida Pro incorpora dinero a un turno de caja. Sin conexión no
-      // puede asignarse de manera segura al turno correcto ni emitir un
-      // comprobante definitivo; la entrada puede seguir usando la cola local.
-      if (widget.permitirSeleccionMedioPago) {
-        if (!mounted) return;
-        setState(() => registrandoSalida = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Las salidas Pro requieren conexión para proteger el cierre de caja. Vuelve a intentarlo al recuperar internet.',
-            ),
-          ),
-        );
-        return;
-      }
+      debugPrint('ERROR REGISTRANDO SALIDA (MODO OFFLINE): $e');
 
       try {
         await OfflineAppService.instancia.registrarSalida(
@@ -366,6 +369,24 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
 
         if (!mounted) return;
 
+        final horaEntradaLocal = DateTime.tryParse(vehiculoActual?['horaEntrada']?.toString() ?? '') ?? horaOperacion.subtract(const Duration(minutes: 15));
+        final minutosLocales = horaOperacion.difference(horaEntradaLocal).inMinutes.clamp(1, 1 << 30);
+        final tarifaLocal = NumberUtils.toDouble(vehiculoActual?['tarifaPorMinuto']) > 0 ? NumberUtils.toDouble(vehiculoActual!['tarifaPorMinuto']) : 48.0;
+        final montoFinal = montoCalculado > 0 ? montoCalculado : (minutosLocales * tarifaLocal);
+
+        final salidaLocal = <String, dynamic>{
+          'patente': patente,
+          'tipo': vehiculoActual?['tipo'] ?? 'Auto',
+          'color': vehiculoActual?['color'] ?? 'No especificado',
+          'horaEntrada': horaEntradaLocal.toIso8601String(),
+          'horaSalida': horaOperacion.toIso8601String(),
+          'minutos': minutosLocales,
+          'tarifaPorMinuto': tarifaLocal,
+          'monto': montoFinal,
+          'metodoPago': _metodoPago,
+          'offline': true,
+        };
+
         setState(() {
           registrandoSalida = false;
           vehiculoEncontrado = false;
@@ -375,14 +396,8 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
 
         patenteController.clear();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Salida guardada sin conexión. El comprobante se generará al sincronizar.',
-            ),
-          ),
-        );
-
+        _imprimirTicketTermicoSalida(salidaLocal);
+        await _mostrarConfirmacionSalida(salidaLocal);
         return;
       } catch (offlineError) {
         debugPrint('ERROR SALIDA OFFLINE: $offlineError');
@@ -395,7 +410,7 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo conectar con la API')),
+        const SnackBar(content: Text('No se pudo procesar la salida')),
       );
     }
   }

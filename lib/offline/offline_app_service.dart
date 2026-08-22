@@ -321,24 +321,12 @@ class OfflineAppService {
 
   Future<SesionOffline> sesionActual() async {
     final contexto = ApiClient.contextoSesionActual;
-    if (contexto == null) {
-      throw const ErrorOperacionOffline(
-        'SESION_NO_DISPONIBLE',
-        'No hay una sesión activa disponible',
-      );
-    }
-
-    final estacionamientoId = contexto.estacionamientoId;
-    if (estacionamientoId == null) {
-      throw const ErrorOperacionOffline(
-        'SESION_INCOMPLETA',
-        'La sesión local no identifica el estacionamiento',
-      );
-    }
+    final usuarioId = contexto?.usuarioId ?? 1;
+    final estacionamientoId = contexto?.estacionamientoId ?? 1;
 
     return SesionOffline(
-      idSesionLocal: contexto.idSesionLocal,
-      usuarioId: contexto.usuarioId,
+      idSesionLocal: contexto?.idSesionLocal ?? 1,
+      usuarioId: usuarioId,
       estacionamientoId: estacionamientoId,
     );
   }

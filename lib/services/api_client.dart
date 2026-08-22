@@ -77,17 +77,20 @@ class ApiClient {
   }
 
   /// Elimina el token de instalaciones anteriores que se guardaba en
-  /// preferencias locales. La sesión actual se mantiene sólo en memoria: al
-  /// cerrar completamente la aplicación se solicita login otra vez.
   static Future<void> inicializarSesion() async {
-    _tokenEnMemoria = null;
-    _contextoSesionActual = null;
-    _tokenSuperAdminOriginal = null;
-    _contextoSuperAdminOriginal = null;
     final preferencias = await SharedPreferences.getInstance();
-    await preferencias.remove(_tokenKey);
-    await preferencias.remove('usuario');
-    await preferencias.remove('sesion_activa');
+    final token = preferencias.getString(_tokenKey);
+    final usuarioId = preferencias.getInt('sesion_usuario_id');
+    final estacionamientoId = preferencias.getInt('sesion_estacionamiento_id');
+
+    if (token != null && token.trim().isNotEmpty && usuarioId != null && usuarioId > 0) {
+      _tokenEnMemoria = token.trim();
+      _contextoSesionActual = ContextoSesionActual(
+        idSesionLocal: ++_siguienteIdSesionLocal,
+        usuarioId: usuarioId,
+        estacionamientoId: estacionamientoId ?? 1,
+      );
+    }
   }
 
   static String crearClaveIdempotencia() {
@@ -119,12 +122,14 @@ class ApiClient {
       throw ArgumentError('La sesión no identifica correctamente al usuario');
     }
 
-    // Limpia una sesión de una versión anterior sin guardar el Bearer token
-    // ni el contexto de sesión en SharedPreferences/localStorage.
     final preferencias = await SharedPreferences.getInstance();
-    await preferencias.remove(_tokenKey);
-    await preferencias.remove('usuario');
-    await preferencias.remove('sesion_activa');
+    await preferencias.setString(_tokenKey, tokenNormalizado);
+    await preferencias.setInt('sesion_usuario_id', usuarioId);
+    if (estacionamientoId != null) {
+      await preferencias.setInt('sesion_estacionamiento_id', estacionamientoId);
+    } else {
+      await preferencias.remove('sesion_estacionamiento_id');
+    }
 
     _tokenEnMemoria = tokenNormalizado;
     _tokenSuperAdminOriginal = null;
@@ -132,7 +137,7 @@ class ApiClient {
     _contextoSesionActual = ContextoSesionActual(
       idSesionLocal: ++_siguienteIdSesionLocal,
       usuarioId: usuarioId,
-      estacionamientoId: estacionamientoId,
+      estacionamientoId: estacionamientoId ?? 1,
     );
   }
 
@@ -144,6 +149,8 @@ class ApiClient {
     final preferencias = await SharedPreferences.getInstance();
 
     await preferencias.remove(_tokenKey);
+    await preferencias.remove('sesion_usuario_id');
+    await preferencias.remove('sesion_estacionamiento_id');
     await preferencias.remove('usuario');
     await preferencias.remove('sesion_activa');
   }

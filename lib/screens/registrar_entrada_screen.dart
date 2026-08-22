@@ -106,7 +106,7 @@ class _RegistrarEntradaScreenState extends State<RegistrarEntradaScreen> {
         Uri.parse('${ApiConfig.baseUrl}/api/entradas'),
         body: firmaDatos,
         claveIdempotencia: _claveOperacionPendiente,
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(milliseconds: 2500));
 
       debugPrint('STATUS ENTRADA: ${response.statusCode}');
 

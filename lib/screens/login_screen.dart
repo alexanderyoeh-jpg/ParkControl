@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../services/api_client.dart';
 import '../services/superadmin_service.dart';
@@ -575,29 +577,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 18),
-
                 // =================================================
-                // BOTÓN DESCARGAR APLICACIÓN
+                // SECCIÓN DESCARGA DIRECTA INTELIGENTE
                 // =================================================
-                OutlinedButton.icon(
-                  onPressed: () => ModalDescargas.mostrar(context),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  icon: const Icon(Icons.download_for_offline_outlined, size: 20),
-                  label: const Text(
-                    'Descargar App (Android / Windows / iOS)',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  ),
-                ),
+                _seccionDescargaDirecta(context),
 
-                const SizedBox(height: 35),
+                const SizedBox(height: 25),
 
                 // =================================================
                 // VERSIÓN
@@ -618,6 +603,131 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
       ),
     );
+  }
+
+  Widget _seccionDescargaDirecta(BuildContext context) {
+    final bool esAndroid = defaultTargetPlatform == TargetPlatform.android;
+    final bool esIos = defaultTargetPlatform == TargetPlatform.iOS;
+    final bool esWindows = defaultTargetPlatform == TargetPlatform.windows;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.install_mobile_rounded, color: Color(0xFF3DDC84), size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'Descargar la App oficial',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2979FF).withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text('Modo Offline', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Botón principal según dispositivo detectado
+          if (esAndroid)
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF3DDC84),
+                foregroundColor: Colors.black87,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => _descargar('https://api.neatspace.cl/downloads/parkcontrol.apk'),
+              icon: const Icon(Icons.android, size: 20),
+              label: const Text('Descargar APK para Android', style: TextStyle(fontWeight: FontWeight.bold)),
+            )
+          else if (esIos)
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black87,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => ModalDescargas.mostrar(context),
+              icon: const Icon(Icons.apple, size: 20),
+              label: const Text('Instalar en iPhone / iPad (PWA)', style: TextStyle(fontWeight: FontWeight.bold)),
+            )
+          else if (esWindows)
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0078D4),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => _descargar('https://api.neatspace.cl/downloads/parkcontrol-windows.zip'),
+              icon: const Icon(Icons.desktop_windows, size: 20),
+              label: const Text('Descargar para Windows (PC)', style: TextStyle(fontWeight: FontWeight.bold)),
+            )
+          else
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF3DDC84),
+                foregroundColor: Colors.black87,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => _descargar('https://api.neatspace.cl/downloads/parkcontrol.apk'),
+              icon: const Icon(Icons.android, size: 20),
+              label: const Text('Descargar APK para Android', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+
+          const SizedBox(height: 8),
+
+          // Enlaces directos a todas las plataformas
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            children: [
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white70, visualDensity: VisualDensity.compact),
+                onPressed: () => _descargar('https://api.neatspace.cl/downloads/parkcontrol.apk'),
+                icon: const Icon(Icons.android, size: 14, color: Color(0xFF3DDC84)),
+                label: const Text('APK Android', style: TextStyle(fontSize: 11)),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white70, visualDensity: VisualDensity.compact),
+                onPressed: () => _descargar('https://api.neatspace.cl/downloads/parkcontrol-windows.zip'),
+                icon: const Icon(Icons.desktop_windows, size: 14, color: Color(0xFF0078D4)),
+                label: const Text('Windows PC', style: TextStyle(fontSize: 11)),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white70, visualDensity: VisualDensity.compact),
+                onPressed: () => ModalDescargas.mostrar(context),
+                icon: const Icon(Icons.apple, size: 14),
+                label: const Text('iOS (Safari)', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _descargar(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   static int? _enteroPositivo(Object? valor) {
