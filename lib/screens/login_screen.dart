@@ -27,7 +27,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool cargando = false;
   bool ocultarPassword = true;
-  bool verificandoConfiguracion = true;
+  bool verificandoConfiguracion = false;
   bool requiereConfiguracion = false;
 
   @override
