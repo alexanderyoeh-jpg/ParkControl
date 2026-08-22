@@ -3259,6 +3259,38 @@ app.post('/api/setup/superadmin', (req, res) => {
 });
 
 // ============================================================
+// VERSIÓN Y ACTUALIZACIONES AUTOMÁTICAS (PÚBLICA)
+// ============================================================
+
+app.get('/api/version', (req, res) => {
+  return res.json({
+    version: '1.0.0',
+    versionCode: 1,
+    fecha: '2026-08-22',
+    nombreApp: 'ParkControl',
+    plataformas: {
+      android: {
+        url: 'https://api.neatspace.cl/downloads/parkcontrol.apk',
+        nombreArchivo: 'parkcontrol.apk'
+      },
+      windows: {
+        url: 'https://api.neatspace.cl/downloads/parkcontrol-windows.zip',
+        nombreArchivo: 'parkcontrol-windows.zip'
+      },
+      web: {
+        url: 'https://app.neatspace.cl'
+      }
+    },
+    novedades: [
+      'Módulo de Abonados y Clientes Mensuales',
+      'Impresión Térmica ESC/POS directa (58mm y 80mm)',
+      'Modo Offline-First con sincronización automática',
+      'Panel SuperAdmin para control de estacionamientos'
+    ]
+  });
+});
+
+// ============================================================
 // LOGIN
 // ============================================================
 
@@ -11160,38 +11192,6 @@ app.delete('/api/abonados/:id', requerirAdministrador, (req, res) => {
     console.error('ERROR ELIMINAR ABONADO:', error);
     return res.status(500).json({ mensaje: 'No se pudo eliminar el abonado' });
   }
-});
-
-// ============================================================
-// VERSIÓN Y ACTUALIZACIONES AUTOMÁTICAS
-// ============================================================
-
-app.get('/api/version', (req, res) => {
-  return res.json({
-    version: '1.0.0',
-    versionCode: 1,
-    fecha: '2026-08-22',
-    nombreApp: 'ParkControl',
-    plataformas: {
-      android: {
-        url: 'https://api.neatspace.cl/downloads/parkcontrol.apk',
-        nombreArchivo: 'parkcontrol.apk'
-      },
-      windows: {
-        url: 'https://api.neatspace.cl/downloads/parkcontrol-windows.zip',
-        nombreArchivo: 'parkcontrol-windows.zip'
-      },
-      web: {
-        url: 'https://app.neatspace.cl'
-      }
-    },
-    novedades: [
-      'Módulo de Abonados y Clientes Mensuales',
-      'Impresión Térmica ESC/POS directa (58mm y 80mm)',
-      'Modo Offline-First con sincronización automática',
-      'Panel SuperAdmin para control de estacionamientos'
-    ]
-  });
 });
 
 // ============================================================
