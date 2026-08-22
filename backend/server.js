@@ -11155,6 +11155,8 @@ app.delete('/api/abonados/:id', requerirAdministrador, (req, res) => {
       return res.status(404).json({ mensaje: 'Abonado no encontrado' });
     }
 
+    return res.json({ mensaje: 'Abonado eliminado correctamente' });
+  } catch (error) {
     console.error('ERROR ELIMINAR ABONADO:', error);
     return res.status(500).json({ mensaje: 'No se pudo eliminar el abonado' });
   }
