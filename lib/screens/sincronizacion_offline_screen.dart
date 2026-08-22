@@ -410,8 +410,36 @@ class _SincronizacionOfflineScreenState
                   const SizedBox(height: 14),
                 ],
                 if (operaciones.isNotEmpty) _resumen(operaciones),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF1565FF),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _procesando ? null : _reintentarConflictos,
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('Reintentar Todo', style: TextStyle(fontSize: 13)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFB3261E),
+                          side: const BorderSide(color: Color(0xFFB3261E)),
+                        ),
+                        onPressed: _procesando ? null : _limpiarConflictos,
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                        label: const Text('Limpiar Conflictos', style: TextStyle(fontSize: 13)),
+                      ),
+                    ),
+                  ],
+                ),
                 if (bloqueadas > 0) ...[
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: _procesando ? null : _reanudarBloqueadas,
                     icon: const Icon(Icons.lock_open_outlined),
@@ -426,6 +454,62 @@ class _SincronizacionOfflineScreenState
         },
       ),
     );
+  }
+
+  Future<void> _reintentarConflictos() async {
+    if (_procesando) return;
+    setState(() => _procesando = true);
+    try {
+      final completadas = await OfflineAppService.instancia.reintentarConflictos();
+      await _cargarComprobantes();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Operaciones sincronizadas: $completadas')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al reintentar operaciones')),
+      );
+    } finally {
+      if (mounted) setState(() => _procesando = false);
+    }
+  }
+
+  Future<void> _limpiarConflictos() async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Limpiar conflictos locales'),
+        content: const Text('¿Deseas descartar los conflictos locales pendientes y desbloquear el cierre de caja de inmediato?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB3261E)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Limpiar y Desbloquear'),
+          ),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    setState(() => _procesando = true);
+    try {
+      final limpiadas = await OfflineAppService.instancia.limpiarConflictosLocales();
+      await _cargarComprobantes();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Se limpiaron $limpiadas conflicto(s) local(es). Cierre de caja habilitado.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error al limpiar conflictos')),
+      );
+    } finally {
+      if (mounted) setState(() => _procesando = false);
+    }
   }
 
   Widget _comprobantesSincronizados() {

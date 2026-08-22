@@ -320,6 +320,50 @@ class ColaSincronizacionRepository {
         );
   }
 
+  Future<int> reintentarTodosLosConflictos({
+    required int estacionamientoId,
+    required int usuarioId,
+    DateTime? ahora,
+  }) {
+    final instante = (ahora ?? DateTime.now()).toUtc();
+    return (_db.update(_db.operacionesPendientes)..where(
+          (tabla) =>
+              tabla.estacionamientoId.equals(estacionamientoId) &
+              tabla.usuarioId.equals(usuarioId) &
+              (tabla.estado.equals('conflicto') | tabla.estado.equals('bloqueada')),
+        ))
+        .write(
+          OperacionesPendientesCompanion(
+            estado: const Value('pendiente'),
+            intentos: const Value(0),
+            proximoIntentoEn: const Value(null),
+            actualizadaEn: Value(instante),
+          ),
+        );
+  }
+
+  Future<int> limpiarTodosLosConflictos({
+    required int estacionamientoId,
+    required int usuarioId,
+    DateTime? ahora,
+  }) {
+    final instante = (ahora ?? DateTime.now()).toUtc();
+    return (_db.update(_db.operacionesPendientes)..where(
+          (tabla) =>
+              tabla.estacionamientoId.equals(estacionamientoId) &
+              tabla.usuarioId.equals(usuarioId) &
+              (tabla.estado.equals('conflicto') | tabla.estado.equals('bloqueada')),
+        ))
+        .write(
+          OperacionesPendientesCompanion(
+            estado: const Value('completada'),
+            ultimoError: const Value('Conflicto limpiado por el usuario'),
+            proximoIntentoEn: const Value(null),
+            actualizadaEn: Value(instante),
+          ),
+        );
+  }
+
   Future<void> _marcarTerminal(
     String clave, {
     required int estacionamientoId,

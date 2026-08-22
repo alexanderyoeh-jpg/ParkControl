@@ -873,6 +873,42 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_abonados_estacionamiento_estado
     ON abonados (estacionamiento_id, estado);
 
+  CREATE TABLE IF NOT EXISTS configuracion_multas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    estacionamiento_id INTEGER NOT NULL UNIQUE,
+    multa_monto REAL NOT NULL DEFAULT 15000,
+    motivo_predeterminado TEXT NOT NULL DEFAULT 'Salida sin pago / Fuga de vehículo',
+    actualizado_en TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (estacionamiento_id) REFERENCES estacionamientos(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS morosidad_patentes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    estacionamiento_id INTEGER NOT NULL,
+    patente TEXT NOT NULL,
+    movimiento_id INTEGER,
+    monto_adeudado REAL NOT NULL DEFAULT 0,
+    monto_multa REAL NOT NULL DEFAULT 15000,
+    monto_pagado REAL NOT NULL DEFAULT 0,
+    estado TEXT NOT NULL DEFAULT 'pendiente',
+    motivo TEXT DEFAULT 'Salida sin pago / Fuga de vehículo',
+    registrado_por_usuario_id INTEGER,
+    creado_en TEXT NOT NULL DEFAULT (datetime('now')),
+    pagado_en TEXT,
+    cobrado_por_usuario_id INTEGER,
+    observaciones TEXT,
+    FOREIGN KEY (estacionamiento_id) REFERENCES estacionamientos(id),
+    FOREIGN KEY (movimiento_id) REFERENCES movimientos(id),
+    FOREIGN KEY (registrado_por_usuario_id) REFERENCES usuarios(id),
+    FOREIGN KEY (cobrado_por_usuario_id) REFERENCES usuarios(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_morosidad_estacionamiento_patente
+    ON morosidad_patentes (estacionamiento_id, patente);
+
+  CREATE INDEX IF NOT EXISTS idx_morosidad_estacionamiento_estado
+    ON morosidad_patentes (estacionamiento_id, estado);
+
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     nombre TEXT NOT NULL,
@@ -1869,6 +1905,8 @@ const METODOS_PAGO_ESTACIONAMIENTO = Object.freeze([
   'efectivo',
   'transferencia',
   'tarjeta',
+  'no_pago',
+  'abonado',
   'otro'
 ]);
 
@@ -1881,13 +1919,17 @@ function normalizarMetodoPagoEstacionamiento(valor) {
     debito: 'tarjeta',
     tarjeta_credito: 'tarjeta',
     tarjeta_debito: 'tarjeta',
-    mercadopago: 'tarjeta'
+    mercadopago: 'tarjeta',
+    no_pago: 'no_pago',
+    fuga: 'no_pago',
+    moroso: 'no_pago',
+    morosidad: 'no_pago'
   };
   const normalizado = equivalencias[metodo] || metodo;
 
   return METODOS_PAGO_ESTACIONAMIENTO.includes(normalizado)
     ? normalizado
-    : null;
+    : 'efectivo';
 }
 
 function fechaIsoValida(valor, obligatoria = false) {
@@ -6630,6 +6672,223 @@ app.post(
   }
 );
 
+// ============================================================
+// SUPERADMIN - CONTABILIDAD SAAS Y RECAUDACIÓN DE SUSCRIPCIONES
+// ============================================================
+
+app.get(
+  '/api/superadmin/contabilidad',
+  requerirSuperAdministrador,
+  (req, res) => {
+    try {
+      const pagos = db.prepare(`
+        SELECT
+          p.id,
+          p.estacionamiento_id AS estacionamientoId,
+          e.nombre AS estacionamientoNombre,
+          e.plan AS estacionamientoPlan,
+          e.estado AS estacionamientoEstado,
+          p.monto,
+          p.metodo,
+          p.fecha_pago AS fechaPago,
+          p.periodo_desde AS periodoDesde,
+          p.periodo_hasta AS periodoHasta,
+          p.referencia,
+          p.observacion,
+          p.estado,
+          p.creado_en AS creadoEn
+        FROM pagos_suscripcion p
+        JOIN estacionamientos e ON e.id = p.estacionamiento_id
+        WHERE p.estado = 'confirmado'
+        ORDER BY p.fecha_pago DESC, p.id DESC
+      `).all();
+
+      const totalHistorico = pagos.reduce((acc, p) => acc + (Number(p.monto) || 0), 0);
+
+      const ingresosPorMesMap = {};
+      for (const p of pagos) {
+        const mes = String(p.fechaPago || p.creadoEn || '').slice(0, 7);
+        if (mes) {
+          ingresosPorMesMap[mes] = (ingresosPorMesMap[mes] || 0) + (Number(p.monto) || 0);
+        }
+      }
+
+      const ingresosPorMes = Object.entries(ingresosPorMesMap)
+        .map(([mes, total]) => ({ mes, total }))
+        .sort((a, b) => b.mes.localeCompare(a.mes));
+
+      const mesActual = new Date().toISOString().slice(0, 7);
+      const ingresosMesActual = ingresosPorMesMap[mesActual] || 0;
+
+      const clientes = db.prepare(`
+        SELECT id, nombre, plan, estado, precio_mensual, fecha_vencimiento
+        FROM estacionamientos
+        WHERE visible_superadmin = 1
+      `).all();
+
+      const mrrEstimado = clientes
+        .filter(c => c.estado === 'activo')
+        .reduce((acc, c) => acc + (Number(c.precio_mensual) || 0), 0);
+
+      return res.json({
+        totalHistorico,
+        ingresosMesActual,
+        mrrEstimado,
+        ingresosPorMes,
+        totalPagos: pagos.length,
+        pagos,
+        resumenPlanes: {
+          total: clientes.length,
+          activos: clientes.filter(c => c.estado === 'activo').length,
+          suspendidos: clientes.filter(c => c.estado === 'suspendido').length,
+          vencidos: clientes.filter(c => c.estado === 'vencido').length,
+        }
+      });
+    } catch (error) {
+      console.error('ERROR CONTABILIDAD SUPERADMIN:', error);
+      return res.status(500).json({ mensaje: 'No se pudo cargar la contabilidad de la plataforma' });
+    }
+  }
+);
+
+// ============================================================
+// SUPERADMIN - COMUNICADOS MASIVOS POR CORREO
+// ============================================================
+
+app.post(
+  '/api/superadmin/comunicados/enviar',
+  requerirSuperAdministrador,
+  async (req, res) => {
+    try {
+      const asunto = textoSeguro(req.body.asunto, 180);
+      const mensaje = String(req.body.mensaje || '').trim();
+      const destinatariosTipo = String(req.body.destinatariosTipo || 'todos').toLowerCase();
+
+      if (!asunto || !mensaje) {
+        return res.status(400).json({ mensaje: 'El asunto y el mensaje son requeridos' });
+      }
+
+      let filtroSql = 'WHERE u.activo = 1 AND u.rol IN (\'admin\', \'admin_estacionamiento\')';
+      if (destinatariosTipo === 'activos') {
+        filtroSql += ' AND e.estado = \'activo\'';
+      } else if (destinatariosTipo === 'suspendidos') {
+        filtroSql += ' AND e.estado = \'suspendido\'';
+      }
+
+      const administradores = db.prepare(`
+        SELECT u.id, u.nombre, u.email, e.nombre AS estacionamientoNombre, e.estado AS estacionamientoEstado
+        FROM usuarios u
+        JOIN estacionamientos e ON e.id = u.estacionamiento_id
+        ${filtroSql}
+      `).all();
+
+      let enviados = 0;
+      for (const admin of administradores) {
+        try {
+          const html = `<!doctype html>
+<html>
+<body style="font-family:Arial,sans-serif;color:#172B4D;line-height:1.6;padding:24px;">
+  <div style="background:#0F2B52;color:#ffffff;padding:16px 20px;border-radius:8px 8px 0 0;">
+    <h2 style="margin:0;color:#ffffff;">ParkControl · Comunicado Oficial</h2>
+  </div>
+  <div style="background:#ffffff;border:1px solid #E0E8F5;border-top:none;padding:20px;border-radius:0 0 8px 8px;">
+    <p>Estimado(a) <strong>${admin.nombre || 'Administrador'}</strong> (${admin.estacionamientoNombre}):</p>
+    <div style="margin:20px 0;font-size:15px;white-space:pre-line;color:#253858;">
+      ${mensaje}
+    </div>
+    <hr style="border:none;border-top:1px solid #E0E8F5;margin:24px 0;" />
+    <p style="color:#617181;font-size:12px;margin:0;">
+      Emitido por la Administración General de ParkControl · Contacto: <strong>neatspacespa@gmail.com</strong>
+    </p>
+  </div>
+</body>
+</html>`;
+
+          if (transporteCorreo.disponible) {
+            await transporteCorreo.enviar({
+              para: admin.email,
+              asunto: `[ParkControl] ${asunto}`,
+              html,
+              texto: `Estimado(a) ${admin.nombre || 'Administrador'}:\n\n${mensaje}\n\nParkControl (neatspacespa@gmail.com)`
+            });
+          }
+          enviados++;
+        } catch (_) {}
+      }
+
+      db.prepare(`
+        INSERT INTO superadmin_comunicados
+        (asunto, mensaje, destinatarios_tipo, total_enviados, creado_por, creado_en)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(asunto, mensaje, destinatariosTipo, enviados, req.usuario.id, new Date().toISOString());
+
+      return res.json({
+        mensaje: `Comunicado enviado a ${enviados} administradores de estacionamientos.`,
+        totalEnviados: enviados,
+        destinatariosTipo
+      });
+    } catch (error) {
+      console.error('ERROR ENVIAR COMUNICADO SUPERADMIN:', error);
+      return res.status(500).json({ mensaje: 'No se pudo enviar el comunicado' });
+    }
+  }
+);
+
+app.get(
+  '/api/superadmin/comunicados',
+  requerirSuperAdministrador,
+  (req, res) => {
+    try {
+      const lista = db.prepare(`
+        SELECT id, asunto, mensaje, destinatarios_tipo AS destinatariosTipo, total_enviados AS totalEnviados, creado_en AS creadoEn
+        FROM superadmin_comunicados
+        ORDER BY id DESC
+        LIMIT 50
+      `).all();
+      return res.json({ comunicados: lista });
+    } catch (error) {
+      return res.status(500).json({ mensaje: 'No se pudieron consultar los comunicados' });
+    }
+  }
+);
+
+// ============================================================
+// SUPERADMIN - DESBLOQUEO REMOTO DE TURNOS Y CONFLICTOS
+// ============================================================
+
+app.post(
+  '/api/superadmin/estacionamientos/:id/desbloquear-cajas',
+  requerirSuperAdministrador,
+  (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        return res.status(400).json({ mensaje: 'ID no válido' });
+      }
+
+      const resAlertas = db.prepare(`
+        UPDATE alertas_administrativas
+        SET estado = 'resuelta', resuelta_en = ?, resuelta_por_usuario_id = ?, nota_resolucion = 'Desbloqueado remotamente por SuperAdmin'
+        WHERE estacionamiento_id = ? AND estado = 'pendiente'
+      `).run(new Date().toISOString(), req.usuario.id, id);
+
+      registrarAuditoriaAdministrativa({
+        estacionamientoId: id,
+        accion: 'DESBLOQUEO_REMOTO_SUPERADMIN',
+        usuario: req.usuario,
+        descripcion: `SuperAdmin desbloqueó remotamente cajas y resolvió ${resAlertas.changes} alertas`
+      });
+
+      return res.json({
+        mensaje: `Cajas y alertas desbloqueadas exitosamente para el estacionamiento ID ${id}.`,
+        alertasResueltas: resAlertas.changes
+      });
+    } catch (error) {
+      return res.status(500).json({ mensaje: 'No se pudo realizar el desbloqueo remoto' });
+    }
+  }
+);
+
 // Las rutas que siguen pertenecen a la operación de un estacionamiento.
 // El SuperAdministrador no las usa y las cuentas suspendidas quedan
 // bloqueadas aquí incluso si conservan un token emitido anteriormente.
@@ -8553,12 +8812,62 @@ app.post(
             };
           }
 
+          if (metodoPagoFinal === 'no_pago') {
+            const configMulta = db.prepare(`
+              SELECT multa_monto FROM configuracion_multas WHERE estacionamiento_id = ?
+            `).get(req.usuario.estacionamientoId);
+            const montoMulta = configMulta ? Number(configMulta.multa_monto) : 15000;
+
+            db.prepare(`
+              INSERT INTO morosidad_patentes (
+                estacionamiento_id, patente, movimiento_id, monto_adeudado, monto_multa, estado, motivo, registrado_por_usuario_id, creado_en
+              ) VALUES (?, ?, ?, ?, ?, 'pendiente', 'Salida sin pago / Fuga de vehículo', ?, datetime('now'))
+            `).run(
+              req.usuario.estacionamientoId,
+              patente,
+              movimiento.id,
+              monto,
+              montoMulta,
+              req.usuario.id
+            );
+
+            try {
+              db.prepare(`
+                INSERT INTO alertas_administrativas (
+                  estacionamiento_id, tipo, severidad, estado, entidad_tipo, entidad_id, clave_deduplicacion, titulo, detalle, monto_diferencia, ocurrida_en
+                ) VALUES (?, 'FUGA_VEHICULO_NO_PAGO', 'alta', 'pendiente', 'movimiento', ?, ?, ?, ?, ?, datetime('now'))
+              `).run(
+                req.usuario.estacionamientoId,
+                movimiento.id,
+                `fuga-${movimiento.id}-${Date.now()}`,
+                `Fuga / No Pago: Patente ${patente}`,
+                `Vehículo ${patente} salió sin pagar. Monto adeudado: $${monto}. Multa asignada: $${montoMulta}.`,
+                monto
+              );
+            } catch (_) {}
+
+            try {
+              db.prepare(`
+                INSERT INTO auditoria (
+                  estacionamiento_id, accion, movimiento_id, patente_anterior, patente_nueva, usuario_id, observacion_nueva, fecha
+                ) VALUES (?, 'SALIDA_NO_PAGO_FUGA', ?, ?, ?, ?, ?, datetime('now'))
+              `).run(
+                req.usuario.estacionamientoId,
+                movimiento.id,
+                patente,
+                patente,
+                req.usuario.id,
+                `Salida sin pagar. Deuda: $${monto} - Multa: $${montoMulta}`
+              );
+            } catch (_) {}
+          }
+
           return {
             estadoHttp: 200,
             cuerpo: {
               mensaje: esAbonadoVigente
                 ? `Salida registrada para ABONADO ${patente} ($0 CLP)`
-                : 'Salida registrada correctamente',
+                : (metodoPagoFinal === 'no_pago' ? `Salida registrada como MOROSA / NO PAGO para ${patente}` : 'Salida registrada correctamente'),
               esAbonado: esAbonadoVigente,
               abonado: abonado ? {
                 id: abonado.id,
@@ -8610,8 +8919,218 @@ app.post(
 );
 
 // ============================================================
-// HISTORIAL
+// MOROSIDAD Y GESTIÓN DE MULTAS
 // ============================================================
+
+app.get('/api/morosidad', (req, res) => {
+  try {
+    const estado = req.query.estado || 'todos';
+    let query = `
+      SELECT
+        m.id,
+        m.patente,
+        m.movimiento_id AS movimientoId,
+        m.monto_adeudado AS montoAdeudado,
+        m.monto_multa AS montoMulta,
+        m.monto_pagado AS montoPagado,
+        m.estado,
+        m.motivo,
+        m.creado_en AS creadoEn,
+        m.pagado_en AS pagadoEn,
+        m.observaciones,
+        u1.nombre AS registradoPor,
+        u2.nombre AS cobradoPor
+      FROM morosidad_patentes m
+      LEFT JOIN usuarios u1 ON u1.id = m.registrado_por_usuario_id
+      LEFT JOIN usuarios u2 ON u2.id = m.cobrado_por_usuario_id
+      WHERE m.estacionamiento_id = ?
+    `;
+    const params = [req.usuario.estacionamientoId];
+    if (estado !== 'todos') {
+      query += ' AND m.estado = ?';
+      params.push(estado);
+    }
+    query += ' ORDER BY m.id DESC';
+
+    const registros = db.prepare(query).all(...params);
+    return res.json({ morosidad: registros });
+  } catch (error) {
+    console.error('ERROR GET /api/morosidad:', error);
+    return res.status(500).json({ mensaje: 'Error al consultar morosidad' });
+  }
+});
+
+app.get('/api/morosidad/patente/:patente', (req, res) => {
+  try {
+    const patente = String(req.params.patente || '').trim().toUpperCase();
+    const morosidad = db.prepare(`
+      SELECT
+        id,
+        patente,
+        movimiento_id AS movimientoId,
+        monto_adeudado AS montoAdeudado,
+        monto_multa AS montoMulta,
+        monto_pagado AS montoPagado,
+        estado,
+        motivo,
+        creado_en AS creadoEn,
+        observaciones
+      FROM morosidad_patentes
+      WHERE estacionamiento_id = ? AND patente = ? AND estado = 'pendiente'
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(req.usuario.estacionamientoId, patente);
+
+    return res.json({
+      esMoroso: Boolean(morosidad),
+      morosidad: morosidad || null
+    });
+  } catch (error) {
+    console.error('ERROR GET /api/morosidad/patente:', error);
+    return res.status(500).json({ mensaje: 'Error al verificar patente' });
+  }
+});
+
+app.post('/api/morosidad', requerirAdministrador, (req, res) => {
+  try {
+    const { patente, montoAdeudado, montoMulta, motivo, observaciones } = req.body;
+    const patLimpia = String(patente || '').trim().toUpperCase();
+    if (!patLimpia) {
+      return res.status(400).json({ mensaje: 'La patente es obligatoria' });
+    }
+
+    const resultado = db.prepare(`
+      INSERT INTO morosidad_patentes (
+        estacionamiento_id, patente, monto_adeudado, monto_multa, estado, motivo, registrado_por_usuario_id, observaciones, creado_en
+      ) VALUES (?, ?, ?, ?, 'pendiente', ?, ?, ?, datetime('now'))
+    `).run(
+      req.usuario.estacionamientoId,
+      patLimpia,
+      Number(montoAdeudado) || 0,
+      Number(montoMulta) || 15000,
+      motivo || 'Ingreso manual de multa / morosidad',
+      req.usuario.id,
+      observaciones || ''
+    );
+
+    return res.status(201).json({
+      mensaje: 'Patente agregada a lista de morosos y multas',
+      id: resultado.lastInsertRowid
+    });
+  } catch (error) {
+    console.error('ERROR POST /api/morosidad:', error);
+    return res.status(500).json({ mensaje: 'Error al registrar morosidad' });
+  }
+});
+
+app.post('/api/morosidad/:id/pagar', (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { montoPagado, metodoPago } = req.body;
+
+    const registro = db.prepare(`
+      SELECT * FROM morosidad_patentes WHERE id = ? AND estacionamiento_id = ?
+    `).get(id, req.usuario.estacionamientoId);
+
+    if (!registro) {
+      return res.status(404).json({ mensaje: 'Registro de morosidad no encontrado' });
+    }
+
+    const totalDeuda = Number(registro.monto_adeudado) + Number(registro.monto_multa);
+    const pagado = Number(montoPagado) || totalDeuda;
+
+    db.prepare(`
+      UPDATE morosidad_patentes
+      SET estado = 'pagada', monto_pagado = ?, pagado_en = datetime('now'), cobrado_por_usuario_id = ?
+      WHERE id = ?
+    `).run(pagado, req.usuario.id, id);
+
+    try {
+      db.prepare(`
+        INSERT INTO auditoria (
+          estacionamiento_id, accion, usuario_id, observacion_nueva, fecha
+        ) VALUES (?, 'PAGO_MULTA_MOROSIDAD', ?, ?, datetime('now'))
+      `).run(
+        req.usuario.estacionamientoId,
+        req.usuario.id,
+        `Pago de multa/deuda para patente ${registro.patente}: $${pagado} (${metodoPago || 'efectivo'})`
+      );
+    } catch (_) {}
+
+    return res.json({ mensaje: `Multa y deuda de ${registro.patente} pagadas con éxito ($${pagado})` });
+  } catch (error) {
+    console.error('ERROR POST /api/morosidad/:id/pagar:', error);
+    return res.status(500).json({ mensaje: 'Error al procesar pago de multa' });
+  }
+});
+
+app.post('/api/morosidad/:id/condonar', requerirAdministrador, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { motivo } = req.body;
+
+    const registro = db.prepare(`
+      SELECT * FROM morosidad_patentes WHERE id = ? AND estacionamiento_id = ?
+    `).get(id, req.usuario.estacionamientoId);
+
+    if (!registro) {
+      return res.status(404).json({ mensaje: 'Registro no encontrado' });
+    }
+
+    db.prepare(`
+      UPDATE morosidad_patentes
+      SET estado = 'condonada', observaciones = ?, pagado_en = datetime('now')
+      WHERE id = ?
+    `).run(`Condonada por administrador: ${motivo || 'Sin motivo'}`, id);
+
+    return res.json({ mensaje: `Multa condonada para la patente ${registro.patente}` });
+  } catch (error) {
+    console.error('ERROR POST /api/morosidad/:id/condonar:', error);
+    return res.status(500).json({ mensaje: 'Error al condonar multa' });
+  }
+});
+
+app.get('/api/configuracion/multas', (req, res) => {
+  try {
+    const config = db.prepare(`
+      SELECT multa_monto AS multaMonto, motivo_predeterminado AS motivoPredeterminado
+      FROM configuracion_multas
+      WHERE estacionamiento_id = ?
+    `).get(req.usuario.estacionamientoId);
+
+    return res.json({
+      multaMonto: config ? Number(config.multaMonto) : 15000,
+      motivoPredeterminado: config ? config.motivoPredeterminado : 'Salida sin pago / Fuga de vehículo'
+    });
+  } catch (error) {
+    return res.status(500).json({ mensaje: 'Error al obtener configuración de multas' });
+  }
+});
+
+app.post('/api/configuracion/multas', requerirAdministrador, (req, res) => {
+  try {
+    const { multaMonto, motivoPredeterminado } = req.body;
+    const monto = Number(multaMonto) || 15000;
+    const motivo = motivoPredeterminado || 'Salida sin pago / Fuga de vehículo';
+
+    db.prepare(`
+      INSERT INTO configuracion_multas (estacionamiento_id, multa_monto, motivo_predeterminado, actualizado_en)
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(estacionamiento_id) DO UPDATE SET
+        multa_monto = excluded.multa_monto,
+        motivo_predeterminado = excluded.motivo_predeterminado,
+        actualizado_en = datetime('now')
+    `).run(req.usuario.estacionamientoId, monto, motivo);
+
+    return res.json({
+      mensaje: 'Configuración de multas actualizada correctamente',
+      multaMonto: monto,
+      motivoPredeterminado: motivo
+    });
+  } catch (error) {
+    return res.status(500).json({ mensaje: 'Error al actualizar configuración de multas' });
+  }
+});
 
 app.get(
   '/api/historial',
@@ -9549,6 +10068,101 @@ app.post(
       console.error('ERROR REINTENTAR INFORME POR CORREO:', error);
       return res.status(500).json({
         mensaje: 'No se pudo reintentar el informe'
+      });
+    }
+  }
+);
+
+app.post(
+  '/api/pro/informes-correo/enviar-inmediato',
+  ...GUARDIAS_INFORMES_CORREO_PRO,
+  async (req, res) => {
+    try {
+      const datos = req.body || {};
+      const correoDestino = textoOpcional(datos.correoDestino) || req.usuario.email;
+      const nombreEncargado = textoOpcional(datos.nombreEncargado) || req.usuario.nombre || 'Administrador';
+      const fechaInicio = textoOpcional(datos.fechaInicio) || '';
+      const fechaFin = textoOpcional(datos.fechaFin) || '';
+
+      const estacionamiento = db.prepare(`
+        SELECT id, nombre, plan, zona_horaria, estado
+        FROM estacionamientos
+        WHERE id = ?
+      `).get(req.usuario.estacionamientoId);
+
+      if (!estacionamiento) {
+        return res.status(404).json({ mensaje: 'Estacionamiento no encontrado' });
+      }
+
+      const informe = servicioInformesPro.obtenerContabilidad({
+        estacionamientoId: req.usuario.estacionamientoId,
+        zonaHoraria: estacionamiento.zona_horaria,
+        fechaInicio,
+        fechaFin
+      });
+
+      const csv = servicioInformesPro.crearCsvContabilidad({ informe });
+      const pdf = await servicioInformesPro.crearPdfResumenContable({
+        nombreEstacionamiento: estacionamiento.nombre,
+        informe
+      });
+
+      const periodoTexto = fechaInicio || fechaFin ? `${fechaInicio || 'inicio'} a ${fechaFin || 'hoy'}` : 'Período completo';
+
+      const asunto = `ParkControl · Informe Contable y Auditoría (${estacionamiento.nombre})`;
+      const html = `<!doctype html>
+<html>
+<body style="font-family:Arial,sans-serif;color:#172B4D;line-height:1.6;padding:20px;">
+  <h2 style="color:#0F2B52;margin-bottom:6px;">Hola ${nombreEncargado},</h2>
+  <p>Aquí está el <strong>informe contable y de auditoría</strong> que solicitaste para <strong>${estacionamiento.nombre}</strong>.</p>
+  <div style="background:#F4F6F9;border-left:4px solid #1565FF;padding:14px 18px;border-radius:6px;margin:18px 0;">
+    <p style="margin:4px 0;"><strong>Período:</strong> ${periodoTexto}</p>
+    <p style="margin:4px 0;"><strong>Vehículos cobrados:</strong> ${informe.resumen.cantidadVehiculos}</p>
+    <p style="margin:4px 0;"><strong>Ingresos totales:</strong> $${informe.resumen.ingresosTotales.toLocaleString('es-CL')} CLP</p>
+    <p style="margin:4px 0;"><strong>Minutos totales:</strong> ${informe.resumen.minutosTotales} min</p>
+  </div>
+  <p>Adjuntamos el documento PDF oficial y la planilla de datos para que puedas descargarla y archivarla.</p>
+  <p style="color:#617181;font-size:12px;margin-top:24px;">Enviado automáticamente por ParkControl desde <strong>neatspacespa@gmail.com</strong>.</p>
+</body>
+</html>`;
+
+      const texto = `Hola ${nombreEncargado},\n\nAquí está tu informe contable y de auditoría de ${estacionamiento.nombre} (${periodoTexto}).\n\nVehículos cobrados: ${informe.resumen.cantidadVehiculos}\nIngresos: $${informe.resumen.ingresosTotales} CLP\n\nSe adjuntan los archivos correspondientes.\n\nEquipo ParkControl (neatspacespa@gmail.com)`;
+
+      if (transporteCorreo.disponible) {
+        await transporteCorreo.enviar({
+          para: correoDestino,
+          asunto,
+          html,
+          texto,
+          adjuntos: [
+            {
+              nombre: `informe_contable_parkcontrol_${fechaInicio || 'inicio'}_${fechaFin || 'hoy'}.pdf`,
+              contenido: pdf
+            },
+            {
+              nombre: `movimientos_parkcontrol_${fechaInicio || 'inicio'}_${fechaFin || 'hoy'}.csv`,
+              contenido: Buffer.from(csv.contenido, 'utf8')
+            }
+          ]
+        });
+      }
+
+      registrarAuditoriaAdministrativa({
+        estacionamientoId: req.usuario.estacionamientoId,
+        accion: 'INFORME_CORREO_INMEDIATO',
+        usuario: req.usuario,
+        descripcion: `Informe inmediato enviado a ${correoDestino} (${periodoTexto})`
+      });
+
+      return res.status(200).json({
+        mensaje: `¡Informe enviado exitosamente a ${correoDestino}!`,
+        destinatario: correoDestino,
+        simulado: !transporteCorreo.disponible
+      });
+    } catch (error) {
+      console.error('ERROR ENVIAR INFORME INMEDIATO:', error);
+      return res.status(500).json({
+        mensaje: 'No se pudo enviar el informe por correo: ' + (error.message || 'Error del servidor')
       });
     }
   }

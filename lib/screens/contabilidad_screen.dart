@@ -775,6 +775,101 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
     }
   }
 
+  bool _enviandoCorreo = false;
+
+  Future<void> enviarInformeInmediatoPorCorreo() async {
+    final correoCtrl = TextEditingController();
+    final nombreCtrl = TextEditingController();
+
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.mail_outline_rounded, color: Color(0xFF1565FF)),
+            SizedBox(width: 10),
+            Text('Enviar Informe por Correo'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Se generará el informe contable y de auditoría completo con archivos adjuntos (PDF y Excel) y se enviará automáticamente desde neatspacespa@gmail.com.',
+              style: TextStyle(fontSize: 13, color: Colors.blueGrey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: correoCtrl,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Correo electrónico de destino *',
+                hintText: 'ejemplo@correo.com',
+                prefixIcon: Icon(Icons.email_outlined),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: nombreCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Nombre del destinatario (opcional)',
+                hintText: 'Ej. Juan Pérez',
+                prefixIcon: Icon(Icons.person_outline),
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1565FF)),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Enviar Informe Ahora'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    final correo = correoCtrl.text.trim();
+    if (correo.isEmpty || !correo.contains('@')) {
+      _mostrarMensaje('Ingresa un correo electrónico válido', esError: true);
+      return;
+    }
+
+    setState(() => _enviandoCorreo = true);
+    try {
+      final res = await ApiClient.post(
+        Uri.parse('$apiUrl/api/pro/informes-correo/enviar-inmediato'),
+        body: jsonEncode({
+          'correoDestino': correo,
+          'nombreEncargado': nombreCtrl.text.trim(),
+          'fechaInicio': fechaInicio != null ? _fechaApi(fechaInicio!) : '',
+          'fechaFin': fechaFin != null ? _fechaApi(fechaFin!) : '',
+        }),
+      ).timeout(const Duration(seconds: 15));
+
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        _mostrarMensaje('¡Informe contable y de auditoría enviado a $correo!');
+      } else {
+        final data = jsonDecode(res.body);
+        _mostrarMensaje(data['mensaje'] ?? 'No se pudo enviar el correo', esError: true);
+      }
+    } catch (e) {
+      if (mounted) {
+        _mostrarMensaje('Error de conexión al enviar el correo', esError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _enviandoCorreo = false);
+    }
+  }
+
   pw.Widget _tarjetaPdf(String titulo, String valor) {
     return pw.Expanded(
       child: pw.Container(
@@ -823,36 +918,60 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
   // INFORMACIÓN OPERATIVA PARA EL LIBRO PRO
   // ============================================================
 
-  Future<Map<String, Map<String, dynamic>>>
-  _cargarAnaliticasParaInforme() async {
+  Future<Map<String, dynamic>> _cargarAnaliticasParaInforme() async {
     const periodos = ['dia', 'semana', 'mes', 'semestre', 'ano'];
+    final mapa = <String, dynamic>{};
 
-    final respuestas = await Future.wait(
-      periodos.map((periodo) async {
-        final respuesta = await ApiClient.get(
-          Uri.parse('$apiUrl/api/pro/analitica?periodo=$periodo'),
-        ).timeout(const Duration(seconds: 15));
+    try {
+      final respuestasAnalitica = await Future.wait(
+        periodos.map((periodo) async {
+          final res = await ApiClient.get(
+            Uri.parse('$apiUrl/api/pro/analitica?periodo=$periodo'),
+          ).timeout(const Duration(seconds: 10));
+          return MapEntry(periodo, res.statusCode == 200 ? jsonDecode(res.body) : null);
+        }),
+      );
+      for (final e in respuestasAnalitica) {
+        if (e.value != null) mapa[e.key] = e.value;
+      }
+    } catch (_) {}
 
-        final cuerpo = jsonDecode(respuesta.body);
+    try {
+      final resAuditoria = await ApiClient.get(
+        Uri.parse('$apiUrl/api/auditoria'),
+      ).timeout(const Duration(seconds: 8));
+      if (resAuditoria.statusCode == 200) {
+        final data = jsonDecode(resAuditoria.body);
+        mapa['auditoria'] = data['auditoria'] ?? [];
+      }
+    } catch (_) {}
 
-        if (respuesta.statusCode != 200 || cuerpo is! Map) {
-          throw Exception(
-            cuerpo is Map && cuerpo['mensaje'] != null
-                ? cuerpo['mensaje'].toString()
-                : 'No se pudo preparar el informe de $periodo',
-          );
-        }
+    try {
+      final resMorosidad = await ApiClient.get(
+        Uri.parse('$apiUrl/api/morosidad'),
+      ).timeout(const Duration(seconds: 8));
+      if (resMorosidad.statusCode == 200) {
+        final data = jsonDecode(resMorosidad.body);
+        mapa['morosidad'] = data['morosidad'] ?? [];
+      }
+    } catch (_) {}
 
-        return MapEntry(periodo, Map<String, dynamic>.from(cuerpo));
-      }),
-    );
+    try {
+      final resTurnos = await ApiClient.get(
+        Uri.parse('$apiUrl/api/pro/turnos'),
+      ).timeout(const Duration(seconds: 8));
+      if (resTurnos.statusCode == 200) {
+        final data = jsonDecode(resTurnos.body);
+        mapa['turnos'] = data['turnos'] ?? [];
+      }
+    } catch (_) {}
 
-    return Map<String, Map<String, dynamic>>.fromEntries(respuestas);
+    return mapa;
   }
 
   void _agregarHojasAnalitica(
     Excel excel,
-    Map<String, Map<String, dynamic>> analiticas,
+    Map<String, dynamic> analiticas,
   ) {
     const configuracion = <String, String>{
       'dia': 'Detalle diario',
@@ -874,11 +993,14 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
       horizontalAlign: HorizontalAlign.Center,
     );
 
+    // ========================================================
+    // HOJA 1: RESUMEN MULTI-PERÍODO (DÍA, SEMANA, MES, SEMESTRE, AÑO)
+    // ========================================================
     final resumenSheet = excel['Resumen por período'];
     resumenSheet.merge(
       CellIndex.indexByString('A1'),
       CellIndex.indexByString('F1'),
-      customValue: TextCellValue('PARKCONTROL - RESUMEN OPERATIVO PRO'),
+      customValue: TextCellValue('PARKCONTROL - RESUMEN OPERATIVO MULTI-PERÍODO'),
     );
     resumenSheet.cell(CellIndex.indexByString('A1')).cellStyle = titulo;
     resumenSheet.appendRow([
@@ -897,7 +1019,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
               )
               .cellStyle =
           encabezado;
-      resumenSheet.setColumnWidth(columna, columna == 0 ? 18 : 18);
+      resumenSheet.setColumnWidth(columna, 18);
     }
 
     for (final periodo in configuracion.keys) {
@@ -916,55 +1038,147 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
       ]);
     }
 
-    for (final entrada in configuracion.entries) {
-      final sheet = excel[entrada.value];
-      final analitica = analiticas[entrada.key] ?? <String, dynamic>{};
-      final puntosOriginales = analitica['puntos'];
-      final puntos = puntosOriginales is List
-          ? puntosOriginales
-                .whereType<Map>()
-                .map((punto) => Map<String, dynamic>.from(punto))
-                .where((punto) => punto['disponible'] != false)
-                .toList()
-          : <Map<String, dynamic>>[];
+    // ========================================================
+    // HOJA 2: AUDITORÍA Y SEGURIDAD (MODIFICACIONES Y ANULACIONES)
+    // ========================================================
+    final listaAuditoria = analiticas['auditoria'] is List
+        ? List<Map<String, dynamic>>.from(
+            (analiticas['auditoria'] as List).whereType<Map>(),
+          )
+        : <Map<String, dynamic>>[];
 
-      sheet.merge(
-        CellIndex.indexByString('A1'),
-        CellIndex.indexByString('F1'),
-        customValue: TextCellValue(
-          'PARKCONTROL - ${entrada.value.toUpperCase()}',
-        ),
-      );
-      sheet.cell(CellIndex.indexByString('A1')).cellStyle = titulo;
-      sheet.appendRow([
-        TextCellValue('Corte'),
-        TextCellValue('Entradas'),
-        TextCellValue('Salidas'),
-        TextCellValue('Modificaciones'),
-        TextCellValue('Eliminaciones'),
-        TextCellValue('Ingresos'),
+    final auditSheet = excel['Auditoría y Modificaciones'];
+    auditSheet.merge(
+      CellIndex.indexByString('A1'),
+      CellIndex.indexByString('I1'),
+      customValue: TextCellValue('PARKCONTROL - REGISTRO DE AUDITORÍA Y SEGURIDAD'),
+    );
+    auditSheet.cell(CellIndex.indexByString('A1')).cellStyle = titulo;
+    auditSheet.appendRow([
+      TextCellValue('ID'),
+      TextCellValue('Fecha'),
+      TextCellValue('Acción'),
+      TextCellValue('Patente Anterior'),
+      TextCellValue('Patente Nueva'),
+      TextCellValue('Tipo Anterior'),
+      TextCellValue('Tipo Nuevo'),
+      TextCellValue('Cajero / Responsable'),
+      TextCellValue('Observación / Motivo'),
+    ]);
+
+    for (var col = 0; col < 9; col++) {
+      auditSheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 1)).cellStyle = encabezado;
+      auditSheet.setColumnWidth(col, col == 8 ? 32 : (col == 1 ? 20 : 16));
+    }
+
+    for (final item in listaAuditoria) {
+      auditSheet.appendRow([
+        IntCellValue(_toInt(item['id'])),
+        TextCellValue(formatearFecha(item['fecha'])),
+        TextCellValue(item['accion']?.toString() ?? '-'),
+        TextCellValue(item['patenteAnterior']?.toString() ?? '-'),
+        TextCellValue(item['patenteNueva']?.toString() ?? '-'),
+        TextCellValue(item['tipoAnterior']?.toString() ?? '-'),
+        TextCellValue(item['tipoNuevo']?.toString() ?? '-'),
+        TextCellValue(item['usuarioNombre']?.toString() ?? item['usuarioEmail']?.toString() ?? 'Cajero'),
+        TextCellValue(item['observacionNueva']?.toString() ?? item['observacionAnterior']?.toString() ?? '-'),
       ]);
+    }
 
-      for (var columna = 0; columna < 6; columna++) {
-        sheet
-                .cell(
-                  CellIndex.indexByColumnRow(columnIndex: columna, rowIndex: 1),
-                )
-                .cellStyle =
-            encabezado;
-        sheet.setColumnWidth(columna, columna == 0 ? 18 : 16);
-      }
+    // ========================================================
+    // HOJA 3: MOROSIDAD Y FUGAS (SALIDAS SIN PAGO)
+    // ========================================================
+    final listaMorosidad = analiticas['morosidad'] is List
+        ? List<Map<String, dynamic>>.from(
+            (analiticas['morosidad'] as List).whereType<Map>(),
+          )
+        : <Map<String, dynamic>>[];
 
-      for (final punto in puntos) {
-        sheet.appendRow([
-          TextCellValue(punto['etiqueta']?.toString() ?? '-'),
-          IntCellValue(_toInt(punto['entradas'])),
-          IntCellValue(_toInt(punto['salidas'])),
-          IntCellValue(_toInt(punto['modificaciones'])),
-          IntCellValue(_toInt(punto['eliminaciones'])),
-          DoubleCellValue(_toDouble(punto['ingresos'])),
-        ]);
-      }
+    final morosidadSheet = excel['Morosidad y Multas'];
+    morosidadSheet.merge(
+      CellIndex.indexByString('A1'),
+      CellIndex.indexByString('H1'),
+      customValue: TextCellValue('PARKCONTROL - REGISTRO DE FUGAS, MOROSIDAD Y MULTAS'),
+    );
+    morosidadSheet.cell(CellIndex.indexByString('A1')).cellStyle = titulo;
+    morosidadSheet.appendRow([
+      TextCellValue('ID'),
+      TextCellValue('Patente'),
+      TextCellValue('Fecha Fuga'),
+      TextCellValue('Deuda Estacionamiento'),
+      TextCellValue('Multa Administrativa'),
+      TextCellValue('Total Adeudado'),
+      TextCellValue('Estado'),
+      TextCellValue('Observaciones'),
+    ]);
+
+    for (var col = 0; col < 8; col++) {
+      morosidadSheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 1)).cellStyle = encabezado;
+      morosidadSheet.setColumnWidth(col, col == 7 ? 30 : (col == 2 ? 20 : 16));
+    }
+
+    for (final item in listaMorosidad) {
+      final deuda = _toDouble(item['montoAdeudado']);
+      final multa = _toDouble(item['montoMulta']);
+      morosidadSheet.appendRow([
+        IntCellValue(_toInt(item['id'])),
+        TextCellValue(item['patente']?.toString() ?? '-'),
+        TextCellValue(formatearFecha(item['creadoEn'])),
+        DoubleCellValue(deuda),
+        DoubleCellValue(multa),
+        DoubleCellValue(deuda + multa),
+        TextCellValue(item['estado']?.toString().toUpperCase() ?? 'PENDIENTE'),
+        TextCellValue(item['observaciones']?.toString() ?? item['motivo']?.toString() ?? '-'),
+      ]);
+    }
+
+    // ========================================================
+    // HOJA 4: TURNOS Y CUADRES DE CAJA
+    // ========================================================
+    final listaTurnos = analiticas['turnos'] is List
+        ? List<Map<String, dynamic>>.from(
+            (analiticas['turnos'] as List).whereType<Map>(),
+          )
+        : <Map<String, dynamic>>[];
+
+    final turnosSheet = excel['Turnos y Cuadres de Caja'];
+    turnosSheet.merge(
+      CellIndex.indexByString('A1'),
+      CellIndex.indexByString('J1'),
+      customValue: TextCellValue('PARKCONTROL - HISTORIAL DE ARQUEOS Y CIERRES DE CAJA'),
+    );
+    turnosSheet.cell(CellIndex.indexByString('A1')).cellStyle = titulo;
+    turnosSheet.appendRow([
+      TextCellValue('Turno ID'),
+      TextCellValue('Cajero'),
+      TextCellValue('Apertura'),
+      TextCellValue('Cierre'),
+      TextCellValue('Fondo Inicial'),
+      TextCellValue('Efectivo Esperado'),
+      TextCellValue('Efectivo Declarado'),
+      TextCellValue('Diferencia'),
+      TextCellValue('Estado'),
+      TextCellValue('Novedad'),
+    ]);
+
+    for (var col = 0; col < 10; col++) {
+      turnosSheet.cell(CellIndex.indexByColumnRow(columnIndex: col, rowIndex: 1)).cellStyle = encabezado;
+      turnosSheet.setColumnWidth(col, col == 9 ? 30 : (col == 2 || col == 3 ? 20 : 16));
+    }
+
+    for (final turno in listaTurnos) {
+      turnosSheet.appendRow([
+        IntCellValue(_toInt(turno['id'])),
+        TextCellValue(turno['cajeroNombre']?.toString() ?? 'Cajero'),
+        TextCellValue(formatearFecha(turno['apertura'])),
+        TextCellValue(formatearFecha(turno['cierre'])),
+        DoubleCellValue(_toDouble(turno['montoInicial'])),
+        DoubleCellValue(_toDouble(turno['montoEsperado'])),
+        DoubleCellValue(_toDouble(turno['montoDeclarado'])),
+        DoubleCellValue(_toDouble(turno['diferencia'])),
+        TextCellValue(turno['estado']?.toString().toUpperCase() ?? '-'),
+        TextCellValue(turno['novedadCierre']?.toString() ?? '-'),
+      ]);
     }
   }
 
@@ -1542,6 +1756,38 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> {
                 ),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFFB3261E),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: cargando || _exportando || _enviandoCorreo || registros.isEmpty
+                    ? null
+                    : enviarInformeInmediatoPorCorreo,
+                icon: _enviandoCorreo
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.send_rounded),
+                label: Text(
+                  _enviandoCorreo
+                      ? 'Enviando a tu correo...'
+                      : '📧 Enviar Informe Inmediato a mi Correo',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F2B52),
+                  foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),

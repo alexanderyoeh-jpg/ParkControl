@@ -431,36 +431,72 @@ class _AuditoriaCajerosProScreenState extends State<AuditoriaCajerosProScreen>
   );
 
   Widget _desempenoCajeros() {
-    if (_cajeros.isEmpty)
+    if (_cajeros.isEmpty) {
       return _vacio('Aún no hay cajeros registrados para este período.');
+    }
 
-    final maximo = _cajeros.fold<double>(
+    final ordenados = List<Map<String, dynamic>>.from(_cajeros)
+      ..sort((a, b) => _numero(b['recaudado']).compareTo(_numero(a['recaudado'])));
+
+    final maximo = ordenados.fold<double>(
       0,
       (mayor, cajero) => math.max(mayor, _numero(cajero['recaudado'])),
     );
+
     return Column(
-      children: _cajeros.map((cajero) {
+      children: List.generate(ordenados.length, (indice) {
+        final cajero = ordenados[indice];
         final recaudado = _numero(cajero['recaudado']);
         final progreso = maximo == 0 ? 0.0 : recaudado / maximo;
         final diferencia = _numero(cajero['diferenciaAcumulada']);
+
+        String medalla = '';
+        Color medallaColor = Colors.transparent;
+        if (indice == 0 && recaudado > 0) {
+          medalla = '🥇 1° Lugar';
+          medallaColor = const Color(0xFFFFD700);
+        } else if (indice == 1 && recaudado > 0) {
+          medalla = '🥈 2° Lugar';
+          medallaColor = const Color(0xFFC0C0C0);
+        } else if (indice == 2 && recaudado > 0) {
+          medalla = '🥉 3° Lugar';
+          medallaColor = const Color(0xFFCD7F32);
+        }
+
         return Container(
-          margin: const EdgeInsets.only(bottom: 10),
+          margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
-          decoration: _caja(),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: indice == 0 ? const Color(0xFF2B6EEF).withValues(alpha: 0.4) : const Color(0xFFE0E8F5),
+              width: indice == 0 ? 1.5 : 1.0,
+            ),
+            boxShadow: [
+              if (indice == 0)
+                BoxShadow(
+                  color: const Color(0xFF2B6EEF).withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+            ],
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
                   CircleAvatar(
-                    backgroundColor: const Color(0xFFE6EEFF),
+                    backgroundColor: indice == 0 ? const Color(0xFFFFFAEB) : const Color(0xFFE6EEFF),
                     child: Text(
-                      (cajero['nombre']?.toString().trim().isNotEmpty ?? false)
+                      indice == 0 ? '👑' : ((cajero['nombre']?.toString().trim().isNotEmpty ?? false)
                           ? cajero['nombre'].toString().trim()[0].toUpperCase()
-                          : '?',
-                      style: const TextStyle(
-                        color: Color(0xFF2B6EEF),
+                          : '?'),
+                      style: TextStyle(
+                        color: indice == 0 ? Colors.orange.shade800 : const Color(0xFF2B6EEF),
                         fontWeight: FontWeight.w800,
+                        fontSize: indice == 0 ? 18 : 14,
                       ),
                     ),
                   ),
@@ -469,9 +505,27 @@ class _AuditoriaCajerosProScreenState extends State<AuditoriaCajerosProScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          cajero['nombre']?.toString() ?? 'Cajero',
-                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        Row(
+                          children: [
+                            Text(
+                              cajero['nombre']?.toString() ?? 'Cajero',
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+                            ),
+                            if (medalla.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: medallaColor.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  medalla,
+                                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF5C4033)),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         Text(
                           cajero['email']?.toString() ?? '',
@@ -483,12 +537,26 @@ class _AuditoriaCajerosProScreenState extends State<AuditoriaCajerosProScreen>
                       ],
                     ),
                   ),
-                  Text(
-                    _pesos(recaudado),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF0F6B48),
-                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _pesos(recaudado),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                          color: Color(0xFF0F6B48),
+                        ),
+                      ),
+                      if (diferencia == 0)
+                        const Row(
+                          children: [
+                            Icon(Icons.check_circle, size: 12, color: Color(0xFF168A4C)),
+                            SizedBox(width: 3),
+                            Text('Caja 100% precisa', style: TextStyle(fontSize: 11, color: Color(0xFF168A4C), fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -497,40 +565,51 @@ class _AuditoriaCajerosProScreenState extends State<AuditoriaCajerosProScreen>
                 borderRadius: BorderRadius.circular(8),
                 child: LinearProgressIndicator(
                   value: progreso,
-                  minHeight: 7,
-                  color: const Color(0xFF2B6EEF),
+                  minHeight: 8,
+                  color: indice == 0 ? const Color(0xFF20B46A) : const Color(0xFF2B6EEF),
                   backgroundColor: const Color(0xFFE8EDF6),
                 ),
               ),
-              const SizedBox(height: 13),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 12,
                 runSpacing: 5,
                 children: [
-                  _datoCajero('${_entero(cajero['turnosCerrados'])} turnos'),
-                  _datoCajero('${_entero(cajero['cobros'])} cobros'),
-                  _datoCajero(
-                    '${_entero(cajero['modificaciones'])} modificaciones',
-                  ),
-                  _datoCajero(
-                    '${_entero(cajero['eliminaciones'])} eliminaciones',
-                  ),
+                  _datoCajero('📊 ${_entero(cajero['turnosCerrados'])} turnos'),
+                  _datoCajero('💳 ${_entero(cajero['cobros'])} cobros'),
+                  _datoCajero('✏️ ${_entero(cajero['modificaciones'])} modificaciones'),
+                  _datoCajero('🗑️ ${_entero(cajero['eliminaciones'])} eliminaciones'),
                 ],
               ),
               if (diferencia != 0) ...[
                 const SizedBox(height: 9),
-                Text(
-                  'Diferencia acumulada en cierres: ${_pesos(diferencia)}',
-                  style: const TextStyle(
-                    color: Color(0xFFA46700),
-                    fontWeight: FontWeight.w700,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.warning_amber_rounded, size: 16, color: Color(0xFFA46700)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Diferencia acumulada en cierres: ${_pesos(diferencia)}',
+                        style: const TextStyle(
+                          color: Color(0xFFA46700),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ],
           ),
         );
-      }).toList(),
+      }),
     );
   }
 

@@ -7,6 +7,8 @@ import 'cliente_detalle_screen.dart';
 import 'cliente_form_screen.dart';
 import 'clientes_screen.dart';
 import 'login_screen.dart';
+import 'superadmin_comunicados_screen.dart';
+import 'superadmin_contabilidad_screen.dart';
 
 class SuperAdminDashboard extends StatefulWidget {
   const SuperAdminDashboard({super.key});
@@ -526,6 +528,22 @@ class _SuperAdminDashboardState extends State<SuperAdminDashboard> {
                   onPressed: _nuevoCliente,
                   icon: const Icon(Icons.add_business_outlined),
                   label: const Text('Crear cliente'),
+                ),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168A4C)),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SuperadminContabilidadScreen()),
+                  ),
+                  icon: const Icon(Icons.account_balance_wallet_outlined),
+                  label: const Text('Finanzas y Suscripciones SaaS'),
+                ),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0F2B52)),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SuperadminComunicadosScreen()),
+                  ),
+                  icon: const Icon(Icons.campaign_rounded),
+                  label: const Text('Comunicados Masivos (Correo)'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _abrirClientes,

@@ -18,6 +18,7 @@ import 'historial_screen.dart';
 import 'informes_programados_pro_screen.dart';
 import 'login_screen.dart';
 import 'modificar_screen.dart';
+import 'morosidad_screen.dart';
 import 'reportes_screen.dart';
 import 'suscripcion_metodo_pago_screen.dart';
 import 'tarifas_screen.dart';
@@ -588,6 +589,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 titulo: 'Auditoría',
                 subtitulo: 'Revisar cambios y anulaciones',
                 onTap: () => _abrirPantalla(const AuditoriaScreen()),
+              ),
+              _opcionMenu(
+                icono: Icons.gavel_rounded,
+                titulo: 'Gestión de Morosos y Multas',
+                subtitulo: 'Vehículos con fuga, cobro de multas y reglas',
+                onTap: () => _abrirPantalla(const MorosidadScreen()),
               ),
               if (_capacidades?.cierreCaja ?? false)
                 _opcionMenu(

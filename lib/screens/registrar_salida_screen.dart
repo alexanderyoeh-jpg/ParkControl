@@ -921,6 +921,10 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
                               child: Text('Tarjeta (débito o crédito)'),
                             ),
                             DropdownMenuItem(
+                              value: 'no_pago',
+                              child: Text('⚠️ No Pago / Fuga de vehículo', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                            ),
+                            DropdownMenuItem(
                               value: 'otro',
                               child: Text('Otro medio'),
                             ),
@@ -932,6 +936,29 @@ class _RegistrarSalidaScreenState extends State<RegistrarSalidaScreen> {
                                   setState(() => _metodoPago = valor);
                                 },
                         ),
+                        if (_metodoPago == 'no_pago') ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.warning_amber_rounded, color: Colors.red),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'El vehículo se registrará como FUGA / NO PAGO. La patente quedará registrada en lista de morosos con multa automática (\$15.000) para sus próximos ingresos.',
+                                    style: TextStyle(color: Colors.red.shade900, fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
 
                       const SizedBox(height: 20),

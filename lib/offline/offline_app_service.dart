@@ -407,6 +407,23 @@ class OfflineAppService {
     );
   }
 
+  Future<int> reintentarConflictos() async {
+    final sesion = await sesionActual();
+    await _cola.reintentarTodosLosConflictos(
+      estacionamientoId: sesion.estacionamientoId,
+      usuarioId: sesion.usuarioId,
+    );
+    return procesarPendientesDisponibles(forzarAhora: true);
+  }
+
+  Future<int> limpiarConflictosLocales() async {
+    final sesion = await sesionActual();
+    return _cola.limpiarTodosLosConflictos(
+      estacionamientoId: sesion.estacionamientoId,
+      usuarioId: sesion.usuarioId,
+    );
+  }
+
   Future<List<ComprobanteOfflineSincronizado>>
   comprobantesSincronizadosPendientes() async {
     try {

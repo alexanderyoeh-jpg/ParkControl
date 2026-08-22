@@ -28,10 +28,38 @@ class _RegistrarEntradaScreenState extends State<RegistrarEntradaScreen> {
   String? _claveOperacionPendiente;
   String? _datosOperacionPendiente;
 
+  Map<String, dynamic>? _morosidadDetectada;
+
   @override
   void initState() {
     super.initState();
     OfflineAppService.instancia.sincronizarEstadoInicialSilencioso();
+    patenteController.addListener(_onPatenteChanged);
+  }
+
+  void _onPatenteChanged() {
+    final pat = patenteController.text.trim().toUpperCase();
+    if (pat.length >= 4) {
+      _verificarMorosidad(pat);
+    } else if (_morosidadDetectada != null) {
+      setState(() => _morosidadDetectada = null);
+    }
+  }
+
+  Future<void> _verificarMorosidad(String pat) async {
+    try {
+      final res = await ApiClient.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/morosidad/patente/$pat'),
+      ).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (mounted) {
+          setState(() {
+            _morosidadDetectada = data['esMoroso'] == true ? data['morosidad'] : null;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _gestionarImpresionTicket({
@@ -335,6 +363,70 @@ class _RegistrarEntradaScreenState extends State<RegistrarEntradaScreen> {
                 ),
               ),
             ),
+
+            if (_morosidadDetectada != null) ...[
+              const SizedBox(height: 14),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.red.shade700, width: 1.5),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.gavel_rounded, color: Colors.red, size: 22),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            '🚨 ALERTA: PATENTE CON MOROSIDAD / MULTA',
+                            style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text('• Deuda previa por fuga: \$${_morosidadDetectada!['montoAdeudado'] ?? 0} CLP', style: const TextStyle(fontSize: 13)),
+                    Text('• Multa por no pago: \$${_morosidadDetectada!['montoMulta'] ?? 15000} CLP', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    const Divider(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Total a cobrar: \$${(num.tryParse(_morosidadDetectada!['montoAdeudado']?.toString() ?? '0') ?? 0) + (num.tryParse(_morosidadDetectada!['montoMulta']?.toString() ?? '15000') ?? 15000)} CLP',
+                            style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w800, fontSize: 14),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168A4C)),
+                          onPressed: () async {
+                            final id = _morosidadDetectada!['id'];
+                            try {
+                              final res = await ApiClient.post(
+                                Uri.parse('${ApiConfig.baseUrl}/api/morosidad/$id/pagar'),
+                                body: jsonEncode({'metodoPago': 'efectivo'}),
+                              );
+                              if (res.statusCode == 200) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('¡Multa y deuda cobradas con éxito!')),
+                                );
+                                setState(() => _morosidadDetectada = null);
+                              }
+                            } catch (_) {}
+                          },
+                          icon: const Icon(Icons.payment, size: 16),
+                          label: const Text('Cobrar Multa', style: TextStyle(fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             const SizedBox(height: 18),
 

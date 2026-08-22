@@ -326,7 +326,7 @@ class _TurnoCajaScreenState extends State<TurnoCajaScreen> {
     if (!resumen.impideCierreCaja) return true;
     if (!mounted) return false;
 
-    final irASincronizacion = await showDialog<bool>(
+    final resultado = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         icon: const Icon(Icons.sync_problem_outlined),
@@ -356,11 +356,17 @@ class _TurnoCajaScreenState extends State<TurnoCajaScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(dialogContext, 'volver'),
             child: const Text('Volver'),
           ),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFB3261E)),
+            onPressed: () => Navigator.pop(dialogContext, 'limpiar_y_cerrar'),
+            icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+            label: const Text('Limpiar y Continuar'),
+          ),
           FilledButton.icon(
-            onPressed: () => Navigator.pop(dialogContext, true),
+            onPressed: () => Navigator.pop(dialogContext, 'sincronizar'),
             icon: const Icon(Icons.sync),
             label: const Text('Ir a sincronización'),
           ),
@@ -368,7 +374,13 @@ class _TurnoCajaScreenState extends State<TurnoCajaScreen> {
       ),
     );
 
-    if (irASincronizacion == true && mounted) {
+    if (resultado == 'limpiar_y_cerrar') {
+      await OfflineAppService.instancia.limpiarConflictosLocales();
+      _notificar('Conflictos locales limpiados. Procediendo al cierre.');
+      return true;
+    }
+
+    if (resultado == 'sincronizar' && mounted) {
       await _abrirSincronizacion();
     }
 
