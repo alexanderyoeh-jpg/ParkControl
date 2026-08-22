@@ -372,8 +372,10 @@ class _LoginScreenState extends State<LoginScreen> {
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Column(
               children: [
                 // =================================================
                 // LOGO
@@ -598,6 +600,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         ),
