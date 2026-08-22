@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
 import '../services/impresion_config_service.dart';
+import '../services/socket_printer/socket_printer.dart';
 import '../services/ticket_termico_service.dart';
 
 class ConfiguracionImpresionScreen extends StatefulWidget {
@@ -17,10 +18,12 @@ class _ConfiguracionImpresionScreenState
   bool _cargando = true;
   bool _guardando = false;
   bool _probando = false;
+  bool _probandoWifi = false;
 
   List<Printer> _impresorasDisponibles = [];
   Printer? _impresoraSeleccionada;
 
+  late TipoConexionImpresora _tipoConexion;
   late AnchoPapelTermico _anchoPapel;
   late bool _entradaAuto;
   late bool _salidaAuto;
@@ -29,6 +32,8 @@ class _ConfiguracionImpresionScreenState
   late TextEditingController _nombreEstController;
   late TextEditingController _encabezadoController;
   late TextEditingController _piePaginaController;
+  late TextEditingController _ipController;
+  late TextEditingController _puertoController;
 
   @override
   void initState() {
@@ -36,6 +41,8 @@ class _ConfiguracionImpresionScreenState
     _nombreEstController = TextEditingController();
     _encabezadoController = TextEditingController();
     _piePaginaController = TextEditingController();
+    _ipController = TextEditingController();
+    _puertoController = TextEditingController(text: '9100');
     _cargar();
   }
 
@@ -44,6 +51,8 @@ class _ConfiguracionImpresionScreenState
     _nombreEstController.dispose();
     _encabezadoController.dispose();
     _piePaginaController.dispose();
+    _ipController.dispose();
+    _puertoController.dispose();
     super.dispose();
   }
 
@@ -77,6 +86,7 @@ class _ConfiguracionImpresionScreenState
       setState(() {
         _impresorasDisponibles = impresoras;
         _impresoraSeleccionada = seleccionada;
+        _tipoConexion = config.tipoConexion;
         _anchoPapel = config.anchoPapel;
         _entradaAuto = config.imprimirEntradaAutomatica;
         _salidaAuto = config.imprimirSalidaAutomatica;
@@ -85,6 +95,8 @@ class _ConfiguracionImpresionScreenState
         _nombreEstController.text = config.nombreEstacionamiento;
         _encabezadoController.text = config.encabezadoPersonalizado;
         _piePaginaController.text = config.piePagina;
+        _ipController.text = config.ipImpresora;
+        _puertoController.text = config.puertoImpresora.toString();
 
         _cargando = false;
       });
@@ -99,7 +111,9 @@ class _ConfiguracionImpresionScreenState
     setState(() => _guardando = true);
 
     try {
+      final puerto = int.tryParse(_puertoController.text.trim()) ?? 9100;
       final nuevaConfig = ImpresionConfig(
+        tipoConexion: _tipoConexion,
         anchoPapel: _anchoPapel,
         imprimirEntradaAutomatica: _entradaAuto,
         imprimirSalidaAutomatica: _salidaAuto,
@@ -108,6 +122,8 @@ class _ConfiguracionImpresionScreenState
         piePagina: _piePaginaController.text.trim(),
         impresoraNombre: _impresoraSeleccionada?.name,
         impresoraUrl: _impresoraSeleccionada?.url,
+        ipImpresora: _ipController.text.trim(),
+        puertoImpresora: puerto,
         incluirCodigoBarras: _codigoBarras,
       );
 
@@ -120,6 +136,26 @@ class _ConfiguracionImpresionScreenState
       if (!mounted) return;
       setState(() => _guardando = false);
       _mostrarMensaje('Error al guardar la configuración', esError: true);
+    }
+  }
+
+  Future<void> _probarConexionWifi() async {
+    final ip = _ipController.text.trim();
+    final puerto = int.tryParse(_puertoController.text.trim()) ?? 9100;
+    if (ip.isEmpty) {
+      _mostrarMensaje('Ingresa la dirección IP de la impresora térmica', esError: true);
+      return;
+    }
+
+    setState(() => _probandoWifi = true);
+    final exito = await SocketPrinterService.probarConexion(ip, puerto);
+    if (!mounted) return;
+    setState(() => _probandoWifi = false);
+
+    if (exito) {
+      _mostrarMensaje('¡Conexión Wi-Fi exitosa con la impresora en $ip:$puerto!');
+    } else {
+      _mostrarMensaje('No se pudo conectar a $ip:$puerto. Verifica que la impresora esté encendida en la misma red.', esError: true);
     }
   }
 
@@ -177,7 +213,7 @@ class _ConfiguracionImpresionScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _seccionImpresora(),
+                  _seccionTipoConexion(),
                   const SizedBox(height: 16),
                   _seccionFormato(),
                   const SizedBox(height: 16),
@@ -193,65 +229,152 @@ class _ConfiguracionImpresionScreenState
     );
   }
 
-  Widget _seccionImpresora() {
+  Widget _seccionTipoConexion() {
     return _TarjetaConfig(
-      titulo: 'Impresora Térmica',
-      icono: Icons.print_outlined,
+      titulo: 'Modo de Conexión de la Impresora',
+      icono: Icons.settings_input_antenna_rounded,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Selecciona la impresora térmica conectada (USB, Bluetooth, Red o Sistema):',
+            'Elige cómo se comunica el punto de venta con la impresora térmica del local:',
             style: TextStyle(fontSize: 13, color: Colors.blueGrey),
           ),
           const SizedBox(height: 12),
-          if (_impresorasDisponibles.isEmpty) ...[
+          SegmentedButton<TipoConexionImpresora>(
+            segments: const [
+              ButtonSegment(
+                value: TipoConexionImpresora.sistema,
+                label: Text('Bluetooth / USB / Driver'),
+                icon: Icon(Icons.bluetooth_connected_rounded),
+              ),
+              ButtonSegment(
+                value: TipoConexionImpresora.redWifi,
+                label: Text('Wi-Fi / Red Local (IP)'),
+                icon: Icon(Icons.wifi_rounded),
+              ),
+            ],
+            selected: {_tipoConexion},
+            onSelectionChanged: (nueva) {
+              setState(() => _tipoConexion = nueva.first);
+            },
+          ),
+          const SizedBox(height: 18),
+
+          if (_tipoConexion == TipoConexionImpresora.sistema) ...[
+            // Vista Bluetooth / USB
+            if (_impresorasDisponibles.isEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF3CD),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFEEBA)),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.bluetooth_searching, color: Color(0xFF856404), size: 22),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '💡 Para conectar por Bluetooth: Empareja la impresora en los Ajustes Bluetooth de tu celular o PC y presiona "Actualizar impresoras" 🔄 arriba.',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF856404)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              DropdownButtonFormField<Printer?>(
+                initialValue: _impresoraSeleccionada,
+                decoration: const InputDecoration(
+                  labelText: 'Impresora Bluetooth / USB seleccionada',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.print_rounded),
+                ),
+                items: [
+                  const DropdownMenuItem<Printer?>(
+                    value: null,
+                    child: Text('Diálogo del sistema (preguntar siempre)'),
+                  ),
+                  ..._impresorasDisponibles.map(
+                    (p) => DropdownMenuItem<Printer?>(
+                      value: p,
+                      child: Text(
+                        '${p.name} ${p.isDefault ? "(Predeterminada)" : ""}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+                onChanged: (p) {
+                  setState(() => _impresoraSeleccionada = p);
+                },
+              ),
+            ],
+          ] else ...[
+            // Vista Wi-Fi / Red Local
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFF3CD),
+                color: const Color(0xFFE8F5E9),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFFFEEBA)),
+                border: Border.all(color: const Color(0xFFC8E6C9)),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.info_outline, color: Color(0xFF856404), size: 20),
-                  SizedBox(width: 8),
+                  Icon(Icons.wifi, color: Color(0xFF2E7D32), size: 22),
+                  SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'No se detectaron impresoras directas. Se usará el diálogo nativo del sistema.',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF856404)),
+                      'Impresión ultra rápida ESC/POS por red local. Ingresa la IP que tiene asignada la impresora térmica en tu router Wi-Fi.',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF2E7D32)),
                     ),
                   ),
                 ],
               ),
             ),
-          ] else ...[
-            DropdownButtonFormField<Printer?>(
-              initialValue: _impresoraSeleccionada,
-              decoration: const InputDecoration(
-                labelText: 'Impresora Predeterminada',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.print),
-              ),
-              items: [
-                const DropdownMenuItem<Printer?>(
-                  value: null,
-                  child: Text('Diálogo del sistema (preguntar siempre)'),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: TextField(
+                    controller: _ipController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Dirección IP de la Impresora',
+                      hintText: 'Ej.: 192.168.1.100',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.router_outlined),
+                    ),
+                  ),
                 ),
-                ..._impresorasDisponibles.map(
-                  (p) => DropdownMenuItem<Printer?>(
-                    value: p,
-                    child: Text(
-                      '${p.name} ${p.isDefault ? "(Predeterminada)" : ""}',
-                      overflow: TextOverflow.ellipsis,
+                const SizedBox(width: 10),
+                Expanded(
+                  flex: 1,
+                  child: TextField(
+                    controller: _puertoController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Puerto',
+                      hintText: '9100',
+                      border: OutlineInputBorder(),
                     ),
                   ),
                 ),
               ],
-              onChanged: (p) {
-                setState(() => _impresoraSeleccionada = p);
-              },
+            ),
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: _probandoWifi ? null : _probarConexionWifi,
+                icon: _probandoWifi
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.network_check_rounded, size: 18),
+                label: Text(_probandoWifi ? 'Probando...' : 'Probar Conexión Wi-Fi'),
+              ),
             ),
           ],
         ],

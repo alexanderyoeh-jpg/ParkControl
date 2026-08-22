@@ -4,7 +4,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'esc_pos_service.dart';
 import 'impresion_config_service.dart';
+import 'socket_printer/socket_printer.dart';
 
 class TicketTermicoService {
   const TicketTermicoService._();
@@ -397,6 +399,33 @@ class TicketTermicoService {
     double? tarifaPorMinuto,
   }) async {
     final config = await ImpresionConfigService.obtenerConfiguracion();
+
+    // 1. Envío Wi-Fi / Red Local directo si está configurado
+    if (config.tipoConexion == TipoConexionImpresora.redWifi && config.ipImpresora.trim().isNotEmpty) {
+      try {
+        final escPosBytes = EscPosGenerator.generarTicketEntradaBytes(
+          nombreEstacionamiento: config.nombreEstacionamiento,
+          patente: patente,
+          tipoVehiculo: tipoVehiculo,
+          horaEntrada: horaEntrada,
+          tarifaPorMinuto: tarifaPorMinuto,
+          piePagina: config.piePagina,
+          anchoCaracteres: config.anchoPapel == AnchoPapelTermico.mm80 ? 48 : 32,
+        );
+
+        final enviado = await SocketPrinterService.enviarBytes(
+          config.ipImpresora.trim(),
+          config.puertoImpresora,
+          escPosBytes,
+        );
+
+        if (enviado) return;
+      } catch (_) {
+        // Fallback a spooler si falla el socket
+      }
+    }
+
+    // 2. Envío Bluetooth / USB / Spooler nativo
     final pdfBytes = await generarTicketEntradaPdf(
       patente: patente,
       tipoVehiculo: tipoVehiculo,
@@ -423,6 +452,38 @@ class TicketTermicoService {
     double? vuelto,
   }) async {
     final config = await ImpresionConfigService.obtenerConfiguracion();
+
+    // 1. Envío Wi-Fi / Red Local directo
+    if (config.tipoConexion == TipoConexionImpresora.redWifi && config.ipImpresora.trim().isNotEmpty) {
+      try {
+        final escPosBytes = EscPosGenerator.generarTicketSalidaBytes(
+          nombreEstacionamiento: config.nombreEstacionamiento,
+          patente: patente,
+          horaEntrada: horaEntrada,
+          horaSalida: horaSalida,
+          minutosTotales: minutosTotales,
+          totalPagar: totalPagar,
+          metodoPago: metodoPago,
+          cajeroNombre: cajeroNombre,
+          tarifaPorMinuto: tarifaPorMinuto,
+          efectivoRecibido: efectivoRecibido,
+          vuelto: vuelto,
+          anchoCaracteres: config.anchoPapel == AnchoPapelTermico.mm80 ? 48 : 32,
+        );
+
+        final enviado = await SocketPrinterService.enviarBytes(
+          config.ipImpresora.trim(),
+          config.puertoImpresora,
+          escPosBytes,
+        );
+
+        if (enviado) return;
+      } catch (_) {
+        // Fallback a spooler
+      }
+    }
+
+    // 2. Envío Bluetooth / USB / Spooler nativo
     final pdfBytes = await generarTicketSalidaPdf(
       patente: patente,
       horaEntrada: horaEntrada,
@@ -441,7 +502,30 @@ class TicketTermicoService {
   }
 
   static Future<void> imprimirTicketPrueba() async {
-    final pdfBytes = await generarTicketPruebaPdf();
+    final config = await ImpresionConfigService.obtenerConfiguracion();
+
+    // 1. Envío Wi-Fi / Red Local directo
+    if (config.tipoConexion == TipoConexionImpresora.redWifi && config.ipImpresora.trim().isNotEmpty) {
+      try {
+        final escPosBytes = EscPosGenerator.generarTicketPruebaBytes(
+          nombreEstacionamiento: config.nombreEstacionamiento,
+          anchoCaracteres: config.anchoPapel == AnchoPapelTermico.mm80 ? 48 : 32,
+        );
+
+        final enviado = await SocketPrinterService.enviarBytes(
+          config.ipImpresora.trim(),
+          config.puertoImpresora,
+          escPosBytes,
+        );
+
+        if (enviado) return;
+      } catch (_) {
+        // Fallback a spooler
+      }
+    }
+
+    // 2. Envío Bluetooth / USB / Spooler nativo
+    final pdfBytes = await generarTicketPruebaPdf(config: config);
     await _enviarAImpresora(pdfBytes, nombreDocumento: 'ticket-prueba.pdf');
   }
 
